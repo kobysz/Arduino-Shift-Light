@@ -35,7 +35,7 @@ Modified by kobysz at gmail dot com
 // Include these libraries 
 #include <Wire.h> 
 #include <Adafruit_LEDBackpack.h> 
-//#include <Adafruit_GFX.h>  - prawdopodobnie niepotrzebne
+//include <Adafruit_GFX.h>  - prawdopodobnie niepotrzebne
 #include <Adafruit_NeoPixel.h> 
 #include <EEPROM.h> 
 #include <EEPROMAnything.h> 
@@ -48,24 +48,25 @@ int DEBUG;
 int NUMPIXELS; 
 
 #define RPM_PIN 2 // rpm input pin
-#define PIN 6  // LED strip DIN pin
-#define CLK 12 // pins definitions for TM1637 and can be changed to other ports    
-#define DIO 13 // pins definitions for TM1637 and can be changed to other ports
+#define LED_PIN 6  // LED strip DIN pin
+#define DISP_CLK 12 // pins definitions for TM1637 and can be changed to other ports    
+#define DISP_DIO 13 // pins definitions for TM1637 and can be changed to other ports
 #define BUTTON_PIN 4 // rotary encoder button pin
 #define ROTARY_PIN1 10 // Arduino pins the encoder is attached to. Attach the center to ground.
 #define ROTARY_PIN2 11 // Arduino pins the encoder is attached to. Attach the center to ground.
+#define OIL_PRESS_PIN 0 // oil pressure sensor pin, other side to (-)
 
 #define DISPLAY_RPM 1
 #define DISPLAY_OILPRESS 2
 
 unsigned int Color(byte r, byte g, byte b) 
 { 
-return( ((unsigned int)g & 0x1F )<<10 | ((unsigned int)b & 0x1F)<<5 | (unsigned int)r & 0x1F); 
+  return( ((unsigned int)g & 0x1F )<<10 | ((unsigned int)b & 0x1F)<<5 | (unsigned int)r & 0x1F); 
 } 
 
-Adafruit_NeoPixel strip = Adafruit_NeoPixel(EEPROM.read(11), PIN, NEO_GRB + NEO_KHZ800); 
+Adafruit_NeoPixel strip = Adafruit_NeoPixel(EEPROM.read(11), LED_PIN, NEO_GRB + NEO_KHZ800); 
 Adafruit_7segment matrix = Adafruit_7segment();
-TM1637 tm1637(CLK,DIO);
+TM1637 tm1637(DISP_CLK,DISP_DIO);
 
 //const int rpmPin = 2; 
 //const int ledPin = 13; 
@@ -89,6 +90,14 @@ boolean flashbool = true;
 int prev_animation;
 int prev_color;
 boolean testbright = false;
+
+//Oil pressure vars
+int op_raw = 0;
+int op_Vin = 5;
+float op_Vout= 0;
+float op_R1= 1000; //1kohm
+float op_R2= 0;
+float op_buffer = 0;
 
 //array for rpm averaging, filtering comparison
 const int numReadings = 5;
@@ -162,13 +171,15 @@ int rotaryval = 0;
   
   volatile unsigned char state = 0; 
   
-  char rotary_process() { 
-  char pinstate = (digitalRead(ROTARY_PIN2) << 1) | digitalRead(ROTARY_PIN1); 
-  state = ttable[state][pinstate];
-  return (state & 0xc0);   
+  char rotary_process()
+  { 
+    char pinstate = (digitalRead(ROTARY_PIN2) << 1) | digitalRead(ROTARY_PIN1); 
+    state = ttable[state][pinstate];
+    return (state & 0xc0);   
   }
 
-int check_mem() {
+int check_mem()
+{
   uint8_t * heapptr;
   uint8_t * stackptr;
   stackptr = (uint8_t *)malloc(4);          // use stackptr temporarily
@@ -180,9 +191,9 @@ int check_mem() {
 
 
                               
-                              /*************
-                               * SETUP *
-                              *************/
+/*************
+*   SETUP    *
+*************/
 
 //SETUP TO CONFIGURE THE ARDUINO AND GET IT READY FOR FIRST RUN 
 void setup() {
@@ -195,9 +206,9 @@ getEEPROM();
 check_first_run();
 prev_animation = pixelanim;
 
-  for (int thisReading = 0; thisReading < numReadings; thisReading++){
-    rpmarray[thisReading] = 0;  
-  }
+for (int thisReading = 0; thisReading < numReadings; thisReading++){
+  rpmarray[thisReading] = 0;  
+}
 
 timeoutCounter = timeoutValue;
 buildarrays();
@@ -218,7 +229,8 @@ pinMode(ROTARY_PIN2, INPUT_PULLUP);
 //senseoption   1 = Interrupt (pin 2), 2 = FreqMeasure (pin 8) 
 switch (senseoption){
   case 1:
-    attachInterrupt(0, sensorIsr, RISING); 
+    //attachInterrupt(0, sensorIsr, RISING); 
+    attachInterrupt(digitalPinToInterrupt(RPM_PIN), sensorIsr, RISING);
   break;
   case 2: 
     FreqMeasure.begin();
@@ -242,146 +254,186 @@ delay(10);
 
 
 
-                        /*************
-                         * LOOP *
-                        *************/
-void loop() { 
-switch (senseoption){
-  case 1:
-     rpm = long(60e6/cal)/(float)interval;
-  break;
+/*************
+ * LOOP *
+*************/
+void loop()
+{ 
+  
+  switch (senseoption)
+  {
+    case 1:
+      rpm = long(60e6/cal)/(float)interval;
+    break;
+  
+    case 2: 
+      if (FreqMeasure.available()) {
+      rpm = (60/cal)* FreqMeasure.countToFrequency(FreqMeasure.read());
+      timeoutCounter = timeoutValue;
+      }
+    break;  
+  }
 
-  case 2: 
-    if (FreqMeasure.available()) {
-    rpm = (60/cal)* FreqMeasure.countToFrequency(FreqMeasure.read());
-    timeoutCounter = timeoutValue;
-    }
-  break;  
-}
-
-if (smoothing){
-if (average != 0){
-  if ((rpm-average > 2500) || (average-rpm > 2500)){                 
-      if(DEBUG){
-      Serial.print("FIXED!  ");
-      Serial.println(rpm);  }      
+  if (smoothing)
+  {
+    if (average != 0)
+    {
+      if ((rpm-average > 2500) || (average-rpm > 2500))
+      {                 
+        if (DEBUG)
+        {
+          Serial.print("FIXED!  ");
+          Serial.println(rpm);
+        }      
         rpm = rpm_last;        
       }
-}
-  total= total - rpmarray[index]; 
-  rpmarray[index] = rpm;
-  total= total + rpmarray[index]; 
-  index = index + 1;   
-  if (index >= numReadings){              
+    }
+    total= total - rpmarray[index]; 
+    rpmarray[index] = rpm;
+    total= total + rpmarray[index]; 
+    index = index + 1;   
+    if (index >= numReadings)
+    {              
       index = 0;    
-   }                       
-  average = total / numReadings;
- 
-  if(DEBUG){Serial.print("average: ");
-  Serial.println(average);}
-  
-
-rpm = average;
+    }                       
+    average = total / numReadings;
+   
+    if (DEBUG) { Serial.print("average: ");
+    Serial.println(average); }
+    
+    rpm = average;
        
-}
+  }
 
-if (timeoutCounter > 0)
-{   
-  if (rpm_last > 0 ){
-      if(DEBUG){Serial.println(rpm); }
-      if (rpm > 9999){ matrix.println(rpm/10);
-      }else{matrix.println(rpm); }
-      matrix.setBrightness(brightval); 
+  if (display_mode == DISPLAY_RPM) //displays RPMs
+  {
+    if (timeoutCounter > 0)
+    {   
+      if (rpm_last > 0 )
+      {
+        if (DEBUG) { Serial.println(rpm); }
+        if (rpm > 9999)
+        {
+          matrix.println(rpm/10);
+        } else {
+          matrix.println(rpm);
+        }
+        matrix.setBrightness(brightval); 
+        matrix.writeDisplay(); 
+      }
+      else
+      {
+        matrix.clear(); 
+        matrix.writeDisplay(); 
+      }
+      rpm_last = rpm;             
+    }
+    else
+    {
+      rpm = 0;
+      matrix.clear(); 
       matrix.writeDisplay(); 
+      clearStrip();
+      strip.show(); 
+    }
+  } //tu lub niżej zamknięcie?
+  
+  if (timeoutCounter > 0) { timeoutCounter--; }  
+
+  if (display_mode == DISPLAY_OILPRESS) //displays OIL PRESSURE
+  {
+    op_raw = analogRead(OIL_PRESS_PIN);    // Reads the Input PIN
+    op_Vout = (5.0 / 1023.0) * op_raw;    // Calculates the Voltage on th Input PIN
+    op_buffer = (op_Vin / op_Vout) - 1;
+    op_R2 = op_R1 / op_buffer;
+    //Serial.print("Voltage: ");      //
+    //Serial.println(Vout);           // Outputs the information
+    //Serial.print("R2: ");           //
+    //Serial.println(R2);             //
+    //delay(1000);
+  }
+  
+  //shift leds
+  if (rpm < shift_rpm)
+  {
+    int a; 
+    for (a = 0; a<NUMPIXELS; a++){
+      if (rpm>rpmtable[a][0]){
+          switch (rpmtable[a][1]){
+            case 1:
+              strip.setPixelColor(a,color1);
+            break;
+    
+            case 2:
+              strip.setPixelColor(a,color2);  
+            break;
+    
+            case 3:
+               strip.setPixelColor(a,color3);  
+            break;        
+          }
+      } else {
+    strip.setPixelColor(a, strip.Color(0, 0, 0));    
+      }
+     strip.show();    
+    }
+  
   }
   else
   {
-      matrix.clear(); 
-      matrix.writeDisplay(); 
-  }
-  rpm_last = rpm;             
-}
-else
-{
-    rpm = 0;
-    matrix.clear(); 
-    matrix.writeDisplay(); 
-    clearStrip();
-    strip.show(); 
-}
+    unsigned long currentMillis = millis();
   
-if (timeoutCounter > 0) { timeoutCounter--; }  
-
-if (rpm < shift_rpm)
-{
-  int a; 
-  for (a = 0; a<NUMPIXELS; a++){
-    if (rpm>rpmtable[a][0]){
-        switch (rpmtable[a][1]){
-          case 1:
-            strip.setPixelColor(a,color1);
-          break;
+    if (currentMillis - previousMillis > shiftinterval)
+    {
+      previousMillis = currentMillis;   
+      flashbool = !flashbool; 
   
-          case 2:
-            strip.setPixelColor(a,color2);  
-          break;
-  
-          case 3:
-             strip.setPixelColor(a,color3);  
-          break;        
+      if (flashbool == true)
+      {
+        for(int i=0; i<NUMPIXELS; i++) { 
+          strip.setPixelColor(i, flclr1); 
         }
-    } else {
-  strip.setPixelColor(a, strip.Color(0, 0, 0));    
-    }
-   strip.show();    
-  }
-
-}
-else
-{
-  unsigned long currentMillis = millis();
-
-    if(currentMillis - previousMillis > shiftinterval) {
-        previousMillis = currentMillis;   
-        flashbool = !flashbool; 
-
-        if (flashbool == true)
-         for(int i=0; i<NUMPIXELS; i++) { 
-            strip.setPixelColor(i, flclr1); 
-         }
-        else
-         for(int i=0; i<NUMPIXELS; i++) { 
-             strip.setPixelColor(i, flclr2); 
-          }
+      }
+      else
+      {
+        for(int i=0; i<NUMPIXELS; i++) { 
+          strip.setPixelColor(i, flclr2); 
+        }
+      }
     strip.show();
     }
-}
+    
+  }
    
 
   //Poll the Button, if pushed, cue animation and enter menu subroutine 
   if (digitalRead(BUTTON_PIN) == LOW){ 
+    
     delay(250); 
     clearStrip(); 
   
-  //Ascend strip 
-  for (int i=0; i<(NUMPIXELS/2)+1; i++){ 
-    strip.setPixelColor(i, strip.Color(0, 0, 25)); 
-    strip.setPixelColor(NUMPIXELS-i, strip.Color(0, 0, 25)); 
-    strip.show(); 
-  delay(35); 
-  } 
-  // Descend Strip 
-  for (int i=0; i<(NUMPIXELS/2)+1; i++){ 
-    strip.setPixelColor(i, strip.Color(0, 0, 0)); 
-    strip.setPixelColor(NUMPIXELS-i, strip.Color(0, 0, 0)); 
-    strip.show(); 
-    delay(35); 
+    //Ascend strip 
+    for (int i=0; i<(NUMPIXELS/2)+1; i++)
+    { 
+      strip.setPixelColor(i, strip.Color(0, 0, 25)); 
+      strip.setPixelColor(NUMPIXELS-i, strip.Color(0, 0, 25)); 
+      strip.show(); 
+      delay(35); 
+    } 
+    // Descend Strip 
+    for (int i=0; i<(NUMPIXELS/2)+1; i++)
+    { 
+      strip.setPixelColor(i, strip.Color(0, 0, 0)); 
+      strip.setPixelColor(NUMPIXELS-i, strip.Color(0, 0, 0)); 
+      strip.show(); 
+      delay(35); 
+    } 
+  
+    menuvar=1; 
+    menu(); 
   } 
   
-  menuvar=1; 
-  menu(); 
-  } 
-} 
+} //end loop 
 
 
 
@@ -414,7 +466,8 @@ if(DEBUG){
  Serial.println(shift_rpm);
 }
 
-  switch(pixelanim){
+  switch (pixelanim)
+  {
 
     case 1:        
       y=0;
@@ -571,10 +624,11 @@ if(DEBUG){
  *************************/
 
 // MENU SYSTEM 
-void menu(){ 
+void menu()
+{ 
 
-//this keeps us in the menu 
-while (menuvar == 1){   
+  //this keeps us in the menu 
+  while (menuvar == 1){   
   
   // This little bit calls the rotary encoder   
   int result = rotary_process(); 
@@ -873,7 +927,7 @@ while (menuvar == 1){
 
 
  case 7:  // PULSES PER REVOLUTION
-      matrix.writeDigitRaw(0,0x00); //
+     matrix.writeDigitRaw(0,0x00); //
      matrix.writeDigitRaw(1,0x73); //P
      matrix.writeDigitRaw(3,0x73); //P
      matrix.writeDigitRaw(4,0x50); //r 
@@ -906,9 +960,12 @@ while (menuvar == 1){
           break;  
         }
         
-
-        if (rpm > 9999){ matrix.println(rpm/10);
-        }else{matrix.println(rpm); }
+        if (rpm > 9999)
+        {
+          matrix.println(rpm/10);
+        } else {
+          matrix.println(rpm);
+        }
         matrix.setBrightness(brightval);
         matrix.writeDisplay();         
    
@@ -935,7 +992,7 @@ while (menuvar == 1){
 
 
      case 8:  // NUMBER OF LEDS
-      matrix.writeDigitRaw(0,0x54); //n
+     matrix.writeDigitRaw(0,0x54); //n
      matrix.writeDigitRaw(1,0x38); //L
      matrix.writeDigitRaw(3,0x79); //E
      matrix.writeDigitRaw(4,0x5E); //D 
@@ -1396,95 +1453,90 @@ matrix.writeDigitRaw(4,0x15); //m
  * SUBROUTINES
  *************************/
 
-
 //This subroutine reads the stored variables from memory 
-void getEEPROM(){ 
-brightval = EEPROM.read(0); 
-sb = EEPROM.read(1); 
-c1 = EEPROM.read(2); 
-c2 = EEPROM.read(3); 
-c3 = EEPROM.read(4); 
-c4 = EEPROM.read(5); 
-c5 = EEPROM.read(6); 
-activation_rpm = EEPROM.read(7); 
-pixelanim  = EEPROM.read(8); 
-senseoption  = EEPROM.read(9); 
-smoothing = EEPROM.read(10); 
-NUMPIXELS = EEPROM.read(11); 
-rpmscaler = EEPROM.read(12); 
-shift_rpm1 = EEPROM.read(13); 
-shift_rpm2 = EEPROM.read(14); 
-shift_rpm3 = EEPROM.read(15); 
-shift_rpm4 = EEPROM.read(16); 
-DEBUG = EEPROM.read(17); 
-seg1_start = EEPROM.read(18); 
-seg1_end = EEPROM.read(19); 
-seg2_start = EEPROM.read(20); 
-seg2_end = EEPROM.read(21); 
-seg3_start = EEPROM.read(22); 
-seg3_end = EEPROM.read(23); 
-activation_rpm1 = EEPROM.read(24); 
-activation_rpm2 = EEPROM.read(25); 
-activation_rpm3 = EEPROM.read(26); 
-activation_rpm4 = EEPROM.read(27); 
-cal = EEPROM.read(28); 
-display_mode = EEPROM.read(29); 
-
-activation_rpm = ((activation_rpm1 << 0) & 0xFF) + ((activation_rpm2 << 8) & 0xFFFF) + ((activation_rpm3 << 16) & 0xFFFFFF) + ((activation_rpm4 << 24) & 0xFFFFFFFF);
-shift_rpm = ((shift_rpm1 << 0) & 0xFF) + ((shift_rpm2 << 8) & 0xFFFF) + ((shift_rpm3 << 16) & 0xFFFFFF) + ((shift_rpm4 << 24) & 0xFFFFFFFF);
-
-buildarrays();
-
-//seg1_start = 3;
-//seg2_start = 5; 
-//seg3_start = 9;
-
+void getEEPROM()
+{ 
+  brightval = EEPROM.read(0); 
+  sb = EEPROM.read(1); 
+  c1 = EEPROM.read(2); 
+  c2 = EEPROM.read(3); 
+  c3 = EEPROM.read(4); 
+  c4 = EEPROM.read(5); 
+  c5 = EEPROM.read(6); 
+  activation_rpm = EEPROM.read(7); 
+  pixelanim  = EEPROM.read(8); 
+  senseoption  = EEPROM.read(9); 
+  smoothing = EEPROM.read(10); 
+  NUMPIXELS = EEPROM.read(11); 
+  rpmscaler = EEPROM.read(12); 
+  shift_rpm1 = EEPROM.read(13); 
+  shift_rpm2 = EEPROM.read(14); 
+  shift_rpm3 = EEPROM.read(15); 
+  shift_rpm4 = EEPROM.read(16); 
+  DEBUG = EEPROM.read(17); 
+  seg1_start = EEPROM.read(18); 
+  seg1_end = EEPROM.read(19); 
+  seg2_start = EEPROM.read(20); 
+  seg2_end = EEPROM.read(21); 
+  seg3_start = EEPROM.read(22); 
+  seg3_end = EEPROM.read(23); 
+  activation_rpm1 = EEPROM.read(24); 
+  activation_rpm2 = EEPROM.read(25); 
+  activation_rpm3 = EEPROM.read(26); 
+  activation_rpm4 = EEPROM.read(27); 
+  cal = EEPROM.read(28); 
+  display_mode = EEPROM.read(29); 
+  
+  activation_rpm = ((activation_rpm1 << 0) & 0xFF) + ((activation_rpm2 << 8) & 0xFFFF) + ((activation_rpm3 << 16) & 0xFFFFFF) + ((activation_rpm4 << 24) & 0xFFFFFFFF);
+  shift_rpm = ((shift_rpm1 << 0) & 0xFF) + ((shift_rpm2 << 8) & 0xFFFF) + ((shift_rpm3 << 16) & 0xFFFFFF) + ((shift_rpm4 << 24) & 0xFFFFFFFF);
+  
+  buildarrays();
 } 
 
 
 //This subroutine writes the stored variables to memory 
-void writeEEPROM(){ 
-
-byte four = (shift_rpm & 0xFF);
-byte three = ((shift_rpm >> 8) & 0xFF);
-byte two = ((shift_rpm >> 16) & 0xFF);
-byte one = ((shift_rpm >> 24) & 0xFF);
-
-byte activation_four = (activation_rpm & 0xFF);
-byte activation_three = ((activation_rpm >> 8) & 0xFF);
-byte activation_two = ((activation_rpm >> 16) & 0xFF);
-byte activation_one = ((activation_rpm >> 24) & 0xFF);
-
-EEPROM.write(0, brightval); 
-EEPROM.write(1, sb); 
-EEPROM.write(2, c1); 
-EEPROM.write(3, c2); 
-EEPROM.write(4, c3); 
-EEPROM.write(5, c4); 
-EEPROM.write(6, c5); 
-EEPROM.write(7, activation_rpm); 
-EEPROM.write(8, pixelanim); 
-EEPROM.write(9, senseoption); 
-EEPROM.write(10, smoothing); 
-EEPROM.write(11, NUMPIXELS); 
-EEPROM.write(12, rpmscaler); 
-EEPROM.write(13, four); 
-EEPROM.write(14, three); 
-EEPROM.write(15, two); 
-EEPROM.write(16, one); 
-EEPROM.write(17, DEBUG); 
-EEPROM.write(18, seg1_start); 
-EEPROM.write(19, seg1_end); 
-EEPROM.write(20, seg2_start); 
-EEPROM.write(21, seg2_end); 
-EEPROM.write(22, seg3_start); 
-EEPROM.write(23, seg3_end); 
-EEPROM.write(24, activation_four); 
-EEPROM.write(25, activation_three); 
-EEPROM.write(26, activation_two); 
-EEPROM.write(27, activation_one); 
-EEPROM.write(28, cal);
-EEPROM.write(29, display_mode);
+void writeEEPROM()
+{ 
+  byte four = (shift_rpm & 0xFF);
+  byte three = ((shift_rpm >> 8) & 0xFF);
+  byte two = ((shift_rpm >> 16) & 0xFF);
+  byte one = ((shift_rpm >> 24) & 0xFF);
+  
+  byte activation_four = (activation_rpm & 0xFF);
+  byte activation_three = ((activation_rpm >> 8) & 0xFF);
+  byte activation_two = ((activation_rpm >> 16) & 0xFF);
+  byte activation_one = ((activation_rpm >> 24) & 0xFF);
+  
+  EEPROM.write(0, brightval); 
+  EEPROM.write(1, sb); 
+  EEPROM.write(2, c1); 
+  EEPROM.write(3, c2); 
+  EEPROM.write(4, c3); 
+  EEPROM.write(5, c4); 
+  EEPROM.write(6, c5); 
+  EEPROM.write(7, activation_rpm); 
+  EEPROM.write(8, pixelanim); 
+  EEPROM.write(9, senseoption); 
+  EEPROM.write(10, smoothing); 
+  EEPROM.write(11, NUMPIXELS); 
+  EEPROM.write(12, rpmscaler); 
+  EEPROM.write(13, four); 
+  EEPROM.write(14, three); 
+  EEPROM.write(15, two); 
+  EEPROM.write(16, one); 
+  EEPROM.write(17, DEBUG); 
+  EEPROM.write(18, seg1_start); 
+  EEPROM.write(19, seg1_end); 
+  EEPROM.write(20, seg2_start); 
+  EEPROM.write(21, seg2_end); 
+  EEPROM.write(22, seg3_start); 
+  EEPROM.write(23, seg3_end); 
+  EEPROM.write(24, activation_four); 
+  EEPROM.write(25, activation_three); 
+  EEPROM.write(26, activation_two); 
+  EEPROM.write(27, activation_one); 
+  EEPROM.write(28, cal);
+  EEPROM.write(29, display_mode);
 } 
 
 
@@ -1492,8 +1544,10 @@ EEPROM.write(29, display_mode);
 
 
 //This sub clears the strip to all OFF 
-void clearStrip() { 
-  for( int i = 0; i<strip.numPixels(); i++){ 
+void clearStrip()
+{ 
+  for( int i = 0; i<strip.numPixels(); i++)
+  { 
     strip.setPixelColor(i, strip.Color(0, 0, 0)); 
     strip.show(); 
   } 
@@ -1502,46 +1556,53 @@ void clearStrip() {
 
 
 //Helper Color Manager - This translates our 255 value into a meaningful color
-uint32_t load_color(int cx){ 
-unsigned int r,g,b; 
-if (cx == 0){ 
+uint32_t load_color(int cx)
+{ 
+  unsigned int r,g,b; 
+  if (cx == 0)
+  { 
+      r = 0; 
+      g = 0; 
+      b = 0; 
+  } 
+  
+  if (cx>0 && cx<=85)
+  { 
+    r = 255-(cx*3); 
+    g = cx*3; 
+    b=0; 
+  } 
+  
+  if (cx>85 && cx < 170)
+  { 
     r = 0; 
+    g = 255 - ((cx-85)*3); 
+    b = (cx-85)*3; 
+  } 
+  
+  if (cx >= 170 && cx<255)
+  { 
+    r = (cx-170)*3; 
     g = 0; 
-    b = 0; 
-} 
-
-if (cx>0 && cx<=85){ 
-  r = 255-(cx*3); 
-  g = cx*3; 
-  b=0; 
-} 
-
-if (cx>85 && cx < 170){ 
-  r = 0; 
-  g = 255 - ((cx-85)*3); 
-  b = (cx-85)*3; 
-} 
-
-if (cx >= 170 && cx<255){ 
-  r = (cx-170)*3; 
-  g = 0; 
-  b = 255 - ((cx-170)*3); 
-} 
-
-if (cx == 255){ 
-  r=255; 
-  g=255; 
-  b=255; 
-} 
-
-r = (r/sb); 
-g = (g/sb); 
-b = (b/sb); 
-return strip.Color(r,g,b); 
+    b = 255 - ((cx-170)*3); 
+  } 
+  
+  if (cx == 255)
+  { 
+    r=255; 
+    g=255; 
+    b=255; 
+  } 
+  
+  r = (r/sb); 
+  g = (g/sb); 
+  b = (b/sb); 
+  return strip.Color(r,g,b); 
 }
 
 
-void testlights(int color){
+void testlights(int color)
+{
   for (int a = 0; a<NUMPIXELS; a++){    
     if (color <4){
         if (rpmtable[a][1]==color){
@@ -1582,35 +1643,36 @@ void testlights(int color){
 }
 
 
-void check_first_run(){
+void check_first_run()
+{
   if (shift_rpm == 0){
-     Serial.println("FIRST RUN! LOADING DEFAULTS");  
-      brightval = 0; 
-      sb = 15; 
-      c1 = 79; 
-      c2 = 48; 
-      c3 = 1; 
-      c4 = 255; 
-      c5 = 0; 
-      
-      activation_rpm = 1000; 
-      shift_rpm = 6000;
-      pixelanim  = 1; 
-      senseoption  = 2;
-      smoothing = 1; 
-      NUMPIXELS = 8;
-      //rpmscaler = EEPROM.read(12);  
-      DEBUG = 0; 
-      seg1_start = 0; 
-      seg1_end = 3; 
-      seg2_start = 0; 
-      seg2_end = 5; 
-      seg3_start = 0; 
-      seg3_end = 7;
-      cal = 1;
-      display_mode = 1;
-      writeEEPROM();
-      resetFunc();
+    Serial.println("FIRST RUN! LOADING DEFAULTS");  
+    brightval = 0; 
+    sb = 15; 
+    c1 = 79; 
+    c2 = 48; 
+    c3 = 1; 
+    c4 = 255; 
+    c5 = 0; 
+    
+    activation_rpm = 1000; 
+    shift_rpm = 6000;
+    pixelanim  = 1; 
+    senseoption = 2;
+    smoothing = 1; 
+    NUMPIXELS = 8;
+    //rpmscaler = EEPROM.read(12);  
+    DEBUG = 0; 
+    seg1_start = 0; 
+    seg1_end = 3; 
+    seg2_start = 0; 
+    seg2_end = 5; 
+    seg3_start = 0; 
+    seg3_end = 7;
+    cal = 1;
+    display_mode = 1;
+    writeEEPROM();
+    resetFunc();
   }  
 }
 
