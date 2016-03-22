@@ -19,6 +19,7 @@ ARDUINO RPM TACHOMETER MULTI-DISPLAY
 Written by Jonduino (Chippernut)
 10-13-2013 
 
+Modified by kobysz at gmail dot com
 
 ********************* Version NOTES ******************** 
 /* v1.0 BETA 11/17/2013 -- Initial Release 
@@ -39,22 +40,31 @@ Written by Jonduino (Chippernut)
 #include <EEPROM.h> 
 #include <EEPROMAnything.h> 
 #include <FreqMeasure.h>
+#include <TM1637.h>
 
 
 void(* resetFunc) (void) = 0;
 int DEBUG;
 int NUMPIXELS; 
+
 #define PIN 6 
+#define CLK 12 //pins definitions for TM1637 and can be changed to other ports    
+#define DIO 13 //pins definitions for TM1637 and can be changed to other ports    
+
+#define DISPLAY_RPM 1
+#define DISPLAY_OILPRESS 2
+
 unsigned int Color(byte r, byte g, byte b) 
 { 
 return( ((unsigned int)g & 0x1F )<<10 | ((unsigned int)b & 0x1F)<<5 | (unsigned int)r & 0x1F); 
 } 
 
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(EEPROM.read(11), PIN, NEO_GRB + NEO_KHZ800); 
-Adafruit_7segment matrix = Adafruit_7segment(); 
+Adafruit_7segment matrix = Adafruit_7segment();
+TM1637 tm1637(CLK,DIO);
 
 const int rpmPin = 2; 
-const int ledPin = 13; 
+//const int ledPin = 13; 
 const int sensorInterrupt = 0; 
 const int timeoutValue = 10; 
 volatile unsigned long lastPulseTime; 
@@ -63,11 +73,11 @@ volatile int timeoutCounter;
 long rpm;
 long rpm_last; 
 int activation_rpm; 
-int shift_rpm; 
+int shift_rpm;
 int menu_enter = 0; 
 
-     int current_seg_number = 1;
-     int seg_mover = 0;
+int current_seg_number = 1;
+int seg_mover = 0;
 
 long previousMillis = 0;
 long shiftinterval = 50;
@@ -93,7 +103,7 @@ int c4;
 int c5; 
 int brightval; //7-seg brightness 
 int sb; //strip brightness 
-int pixelanim =1;
+int pixelanim = 1;
 int senseoption;
 int smoothing;
 int rpmscaler;
@@ -115,6 +125,7 @@ long cal1;
 long cal2;
 long cal3; 
 long cal4;
+int display_mode; //display mode DISPLAY_RPM | DISPLAY_OILPRESS
 
 int rst = 0; 
 int cal; 
@@ -195,6 +206,8 @@ buildarrays();
 matrix.begin(0x70); 
 strip.begin(); 
 strip.show(); // Initialize all pixels to 'off' 
+tm1637.set();
+tm1637.init();
 
 //ROTARY ENCODER 
 pinMode(rpmPin, INPUT);
@@ -272,30 +285,35 @@ rpm = average;
        
 }
 
-if (timeoutCounter > 0){   
+if (timeoutCounter > 0)
+{   
   if (rpm_last > 0 ){
       if(DEBUG){Serial.println(rpm); }
       if (rpm > 9999){ matrix.println(rpm/10);
       }else{matrix.println(rpm); }
       matrix.setBrightness(brightval); 
       matrix.writeDisplay(); 
-    }
-    else{
+  }
+  else
+  {
       matrix.clear(); 
       matrix.writeDisplay(); 
-    }
+  }
   rpm_last = rpm;             
-} else {
-  rpm = 0;
-  matrix.clear(); 
-  matrix.writeDisplay(); 
-  clearStrip();
-  strip.show(); 
+}
+else
+{
+    rpm = 0;
+    matrix.clear(); 
+    matrix.writeDisplay(); 
+    clearStrip();
+    strip.show(); 
 }
   
-if (timeoutCounter > 0){ timeoutCounter--;}  
+if (timeoutCounter > 0) { timeoutCounter--; }  
 
-if (rpm < shift_rpm){
+if (rpm < shift_rpm)
+{
   int a; 
   for (a = 0; a<NUMPIXELS; a++){
     if (rpm>rpmtable[a][0]){
@@ -318,8 +336,9 @@ if (rpm < shift_rpm){
    strip.show();    
   }
 
-} else {
-
+}
+else
+{
   unsigned long currentMillis = millis();
 
     if(currentMillis - previousMillis > shiftinterval) {
@@ -335,7 +354,7 @@ if (rpm < shift_rpm){
              strip.setPixelColor(i, flclr2); 
           }
     strip.show();
-      }
+    }
 }
    
 
@@ -1409,6 +1428,7 @@ activation_rpm2 = EEPROM.read(25);
 activation_rpm3 = EEPROM.read(26); 
 activation_rpm4 = EEPROM.read(27); 
 cal = EEPROM.read(28); 
+display_mode = EEPROM.read(29); 
 
 activation_rpm = ((activation_rpm1 << 0) & 0xFF) + ((activation_rpm2 << 8) & 0xFFFF) + ((activation_rpm3 << 16) & 0xFFFFFF) + ((activation_rpm4 << 24) & 0xFFFFFFFF);
 shift_rpm = ((shift_rpm1 << 0) & 0xFF) + ((shift_rpm2 << 8) & 0xFFFF) + ((shift_rpm3 << 16) & 0xFFFFFF) + ((shift_rpm4 << 24) & 0xFFFFFFFF);
@@ -1464,6 +1484,7 @@ EEPROM.write(25, activation_three);
 EEPROM.write(26, activation_two); 
 EEPROM.write(27, activation_one); 
 EEPROM.write(28, cal);
+EEPROM.write(29, display_mode);
 } 
 
 
@@ -1587,6 +1608,7 @@ void check_first_run(){
       seg3_start = 0; 
       seg3_end = 7;
       cal = 1;
+      display_mode = 1;
       writeEEPROM();
       resetFunc();
   }  
