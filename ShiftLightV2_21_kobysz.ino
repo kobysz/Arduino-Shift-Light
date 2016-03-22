@@ -35,7 +35,7 @@ Modified by kobysz at gmail dot com
 // Include these libraries 
 #include <Wire.h> 
 #include <Adafruit_LEDBackpack.h> 
-#include <Adafruit_GFX.h> 
+//#include <Adafruit_GFX.h>  - prawdopodobnie niepotrzebne
 #include <Adafruit_NeoPixel.h> 
 #include <EEPROM.h> 
 #include <EEPROMAnything.h> 
@@ -47,7 +47,8 @@ void(* resetFunc) (void) = 0;
 int DEBUG;
 int NUMPIXELS; 
 
-#define PIN 6 
+#define RPM_PIN 2 //rpm input pin
+#define PIN 6  //LED strip DIN pin
 #define CLK 12 //pins definitions for TM1637 and can be changed to other ports    
 #define DIO 13 //pins definitions for TM1637 and can be changed to other ports    
 
@@ -63,7 +64,7 @@ Adafruit_NeoPixel strip = Adafruit_NeoPixel(EEPROM.read(11), PIN, NEO_GRB + NEO_
 Adafruit_7segment matrix = Adafruit_7segment();
 TM1637 tm1637(CLK,DIO);
 
-const int rpmPin = 2; 
+//const int rpmPin = 2; 
 //const int ledPin = 13; 
 const int sensorInterrupt = 0; 
 const int timeoutValue = 10; 
@@ -95,7 +96,8 @@ long average = 0;                // the average
 
 
 //These are stored memory variables for adjusting the (5) colors, activation rpm, shift rpm, brightness 
-//Stored in EEPROM Memory 
+//Stored in EEPROM Memory
+int display_mode; //display mode DISPLAY_RPM | DISPLAY_OILPRESS
 int c1; 
 int c2; 
 int c3; 
@@ -125,7 +127,6 @@ long cal1;
 long cal2;
 long cal3; 
 long cal4;
-int display_mode; //display mode DISPLAY_RPM | DISPLAY_OILPRESS
 
 int rst = 0; 
 int cal; 
@@ -209,8 +210,9 @@ strip.show(); // Initialize all pixels to 'off'
 tm1637.set();
 tm1637.init();
 
+//RPM input
+pinMode(RPM_PIN, INPUT);
 //ROTARY ENCODER 
-pinMode(rpmPin, INPUT);
 pinMode(button_pin, INPUT_PULLUP); 
 pinMode(ROTARY_PIN1, INPUT_PULLUP); 
 pinMode(ROTARY_PIN2, INPUT_PULLUP); 
