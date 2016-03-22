@@ -47,10 +47,13 @@ void(* resetFunc) (void) = 0;
 int DEBUG;
 int NUMPIXELS; 
 
-#define RPM_PIN 2 //rpm input pin
-#define PIN 6  //LED strip DIN pin
-#define CLK 12 //pins definitions for TM1637 and can be changed to other ports    
-#define DIO 13 //pins definitions for TM1637 and can be changed to other ports    
+#define RPM_PIN 2 // rpm input pin
+#define PIN 6  // LED strip DIN pin
+#define CLK 12 // pins definitions for TM1637 and can be changed to other ports    
+#define DIO 13 // pins definitions for TM1637 and can be changed to other ports
+#define BUTTON_PIN 4 // rotary encoder button pin
+#define ROTARY_PIN1 10 // Arduino pins the encoder is attached to. Attach the center to ground.
+#define ROTARY_PIN2 11 // Arduino pins the encoder is attached to. Attach the center to ground.
 
 #define DISPLAY_RPM 1
 #define DISPLAY_OILPRESS 2
@@ -144,16 +147,11 @@ uint32_t flclr2;
 int rpmtable[32][3];
 
 // ROTARY ENCODER VARIABLES 
-int button_pin = 4; 
 int menuvar; 
 int val; 
 int rotaryval = 0; 
 
-// CONFIGURATION FOR THE ROTARY ENCODER 
-  // Arduino pins the encoder is attached to. Attach the center to ground. 
-  #define ROTARY_PIN1 10 
-  #define ROTARY_PIN2 11 
-  
+  // CONFIGURATION FOR THE ROTARY ENCODER 
   // Use the full-step state table (emits a code at 00 only) 
   const char ttable[7][4] = { 
   {0x0, 0x2, 0x4, 0x0}, {0x3, 0x0, 0x1, 0x40}, 
@@ -213,7 +211,7 @@ tm1637.init();
 //RPM input
 pinMode(RPM_PIN, INPUT);
 //ROTARY ENCODER 
-pinMode(button_pin, INPUT_PULLUP); 
+pinMode(BUTTON_PIN, INPUT_PULLUP); 
 pinMode(ROTARY_PIN1, INPUT_PULLUP); 
 pinMode(ROTARY_PIN2, INPUT_PULLUP); 
 
@@ -361,7 +359,7 @@ else
    
 
   //Poll the Button, if pushed, cue animation and enter menu subroutine 
-  if (digitalRead(button_pin) == LOW){ 
+  if (digitalRead(BUTTON_PIN) == LOW){ 
     delay(250); 
     clearStrip(); 
   
@@ -587,7 +585,7 @@ while (menuvar == 1){
   rotaryval = constrain(rotaryval, 0, 17); 
 
 //Poll the rotary encoder button to enter menu items
-     if (digitalRead(button_pin) == LOW){ 
+     if (digitalRead(BUTTON_PIN) == LOW){ 
         delay(250); 
         menu_enter = 1; 
       } 
@@ -668,7 +666,7 @@ while (menuvar == 1){
       }
 
 
-     if (digitalRead(button_pin) == LOW){ 
+     if (digitalRead(BUTTON_PIN) == LOW){ 
         delay(250); 
         menu_enter = 0; 
         clearStrip(); 
@@ -711,7 +709,7 @@ while (menuvar == 1){
         matrix.writeDisplay();         
         strip.show();
         
-        if (digitalRead(button_pin) == LOW){ 
+        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           menu_enter = 0; 
           clearStrip(); 
@@ -753,7 +751,7 @@ while (menuvar == 1){
         matrix.writeDisplay();         
         strip.show(); 
         
-        if (digitalRead(button_pin) == LOW){ 
+        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           menu_enter = 0; 
           clearStrip(); 
@@ -803,7 +801,7 @@ while (menuvar == 1){
 
         matrix.writeDisplay();         
            
-        if (digitalRead(button_pin) == LOW){ 
+        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           menu_enter = 0; 
           clearStrip(); 
@@ -857,7 +855,7 @@ while (menuvar == 1){
        }
         matrix.writeDisplay();         
            
-        if (digitalRead(button_pin) == LOW){ 
+        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           menu_enter = 0; 
           clearStrip(); 
@@ -914,7 +912,7 @@ while (menuvar == 1){
         matrix.setBrightness(brightval);
         matrix.writeDisplay();         
    
-       if (digitalRead(button_pin) == LOW){ 
+       if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           menu_enter = 0; 
           clearStrip(); 
@@ -952,7 +950,7 @@ while (menuvar == 1){
         matrix.println(NUMPIXELS); 
         matrix.writeDisplay();         
    
-       if (digitalRead(button_pin) == LOW){ 
+       if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           menu_enter = 0; 
           clearStrip(); 
@@ -1048,7 +1046,7 @@ matrix.writeDigitRaw(4,0x15); //m
           }
 
         
-        if (digitalRead(button_pin) == LOW){           
+        if (digitalRead(BUTTON_PIN) == LOW){           
           delay(250);
           menu_enter = 0;
           clearStrip(); 
@@ -1104,7 +1102,7 @@ matrix.writeDigitRaw(4,0x15); //m
           testlights(1);
         }
       
-        if (digitalRead(button_pin) == LOW){ 
+        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           prev_color = 0;
           menu_enter = 0; 
@@ -1144,7 +1142,7 @@ matrix.writeDigitRaw(4,0x15); //m
         }
         
         
-        if (digitalRead(button_pin) == LOW){ 
+        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           prev_color = 0;
           menu_enter = 0; 
@@ -1180,7 +1178,7 @@ matrix.writeDigitRaw(4,0x15); //m
         }
         
         
-        if (digitalRead(button_pin) == LOW){ 
+        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           prev_color = 0;
           menu_enter = 0; 
@@ -1218,7 +1216,7 @@ matrix.writeDigitRaw(4,0x15); //m
         
         strip.show(); 
                
-        if (digitalRead(button_pin) == LOW){ 
+        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           menu_enter = 0; 
           clearStrip(); 
@@ -1254,7 +1252,7 @@ matrix.writeDigitRaw(4,0x15); //m
         
         strip.show(); 
                 
-        if (digitalRead(button_pin) == LOW){ 
+        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           menu_enter = 0; 
           clearStrip(); 
@@ -1302,7 +1300,7 @@ matrix.writeDigitRaw(4,0x15); //m
 
     matrix.writeDisplay(); 
                  
-        if (digitalRead(button_pin) == LOW){ 
+        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           menu_enter = 0; 
           clearStrip(); 
@@ -1349,7 +1347,7 @@ matrix.writeDigitRaw(4,0x15); //m
     matrix.writeDisplay(); 
  
                 
-        if (digitalRead(button_pin) == LOW){ 
+        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           menu_enter = 0; 
           clearStrip(); 
@@ -1630,7 +1628,7 @@ while (current_seg_number<4){
         if (coloradjust1 == -128){seg_mover--;} 
         if (coloradjust1 == 64){seg_mover++;}    
   
-      if (digitalRead(button_pin) == LOW){ 
+      if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250);
           current_seg_number++;     
         } 
