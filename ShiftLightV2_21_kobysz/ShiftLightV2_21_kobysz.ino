@@ -66,10 +66,9 @@ unsigned int Color(byte r, byte g, byte b)
 } 
 
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(EEPROM.read(11), LED_PIN, NEO_GRB + NEO_KHZ800); 
-//Adafruit_7segment matrix = Adafruit_7segment();
 TM1637 tm1637(DISP_CLK,DISP_DIO);
 
-//test
+//display table
 int8_t RPMDisp[] = {0x00,0x00,0x00,0x00};
 
 //const int rpmPin = 2; 
@@ -205,53 +204,53 @@ void setup() {
  Serial.println("ChipperNut ShiftLight Project. V2."); 
  Serial.println("Prepare for awesome......"); 
 
-//get stored variables 
-getEEPROM();
-check_first_run();
-prev_animation = pixelanim;
+  //get stored variables 
+  getEEPROM();
+  check_first_run();
+  prev_animation = pixelanim;
 
-for (int thisReading = 0; thisReading < numReadings; thisReading++){
-  rpmarray[thisReading] = 0;  
-}
+  for (int thisReading = 0; thisReading < numReadings; thisReading++){
+    rpmarray[thisReading] = 0;  
+  }
 
-timeoutCounter = timeoutValue;
-buildarrays();
+  timeoutCounter = timeoutValue;
+  buildarrays();
+  
+  //matrix.begin(0x70); 
+  strip.begin(); 
+  strip.show(); // Initialize all pixels to 'off' 
+  tm1637.set(0);
+  tm1637.init();
 
-//matrix.begin(0x70); 
-strip.begin(); 
-strip.show(); // Initialize all pixels to 'off' 
-tm1637.set(0);
-tm1637.init();
+  //RPM input
+  pinMode(RPM_PIN, INPUT);
+  //ROTARY ENCODER 
+  pinMode(BUTTON_PIN, INPUT_PULLUP); 
+  pinMode(ROTARY_PIN1, INPUT_PULLUP); 
+  pinMode(ROTARY_PIN2, INPUT_PULLUP); 
 
-//RPM input
-pinMode(RPM_PIN, INPUT);
-//ROTARY ENCODER 
-pinMode(BUTTON_PIN, INPUT_PULLUP); 
-pinMode(ROTARY_PIN1, INPUT_PULLUP); 
-pinMode(ROTARY_PIN2, INPUT_PULLUP); 
+  //senseoption   1 = Interrupt (pin 2), 2 = FreqMeasure (pin 8) 
+  switch (senseoption){
+    case 1:
+      //attachInterrupt(0, sensorIsr, RISING); 
+      attachInterrupt(digitalPinToInterrupt(RPM_PIN), sensorIsr, RISING);
+    break;
+    case 2: 
+      FreqMeasure.begin();
+    break;  
+  }
 
-//senseoption   1 = Interrupt (pin 2), 2 = FreqMeasure (pin 8) 
-switch (senseoption){
-  case 1:
-    //attachInterrupt(0, sensorIsr, RISING); 
-    attachInterrupt(digitalPinToInterrupt(RPM_PIN), sensorIsr, RISING);
-  break;
-  case 2: 
-    FreqMeasure.begin();
-  break;  
-}
-
-//translate the stored 255 color variables into meaningful RGB colors 
-color1 = load_color(c1); 
-delay(10); 
-color2 = load_color(c2); 
-delay(10); 
-color3 = load_color(c3); 
-delay(10); 
-flclr1 = load_color(c4); 
-delay(10); 
-flclr2 = load_color(c5); 
-delay(10); 
+  //translate the stored 255 color variables into meaningful RGB colors 
+  color1 = load_color(c1); 
+  delay(10); 
+  color2 = load_color(c2); 
+  delay(10); 
+  color3 = load_color(c3); 
+  delay(10); 
+  flclr1 = load_color(c4); 
+  delay(10); 
+  flclr2 = load_color(c5); 
+  delay(10); 
 
 } 
 
@@ -344,11 +343,8 @@ void loop()
     op_raw = analogRead(OIL_PRESS_PIN);    // Reads the Input PIN
     op_Vout = (5.0 / 1023.0) * op_raw;    // Calculates the Voltage on th Input PIN
     op_buffer = (op_Vin / op_Vout) - 1;
-    op_R2 = op_R1 / op_buffer;
+    op_R2 = op_R1 / op_buffer; //sensor resistance
 
-    //3-160ohm czujnik 0-10 bar
-    //157ohm/10bar = 15.7 ohm/bar
-    //r2 - 
     if (op_R2 > 10) 
     {
       op_R2 -= 3;
@@ -451,32 +447,30 @@ void loop()
 
 
 void buildarrays(){
-                   
-int x;  //rpm increment
-int y;  //starting point pixel address
-int ya; // second starting point pixel address (for middle-out animation only)
-int i;  //temporary for loop variable
-
-if(DEBUG){
- Serial.println("PIXELANIM   ");
- Serial.println(pixelanim);
- Serial.println("  Start1 ");
- Serial.println(seg1_start);
- Serial.println("  End1 ");
- Serial.println(seg1_end);
- Serial.println("  Start2 ");
- Serial.println(seg2_start);
- Serial.println("  End2 ");
- Serial.println(seg2_end);
- Serial.println("Start3 ");
- Serial.println(seg3_start);
- Serial.println("  End3 ");
- Serial.println(seg3_end);
- Serial.println("  Activation RPM ");
- Serial.println(activation_rpm);
- Serial.println("  SHIFT RPM ");
- Serial.println(shift_rpm);
-}
+  int x;  //rpm increment
+  int y;  //starting point pixel address
+  int ya; // second starting point pixel address (for middle-out animation only)
+  int i;  //temporary for loop variable
+  if(DEBUG){
+   Serial.println("PIXELANIM   ");
+   Serial.println(pixelanim);
+   Serial.println("  Start1 ");
+   Serial.println(seg1_start);
+   Serial.println("  End1 ");
+   Serial.println(seg1_end);
+   Serial.println("  Start2 ");
+   Serial.println(seg2_start);
+   Serial.println("  End2 ");
+   Serial.println(seg2_end);
+   Serial.println("Start3 ");
+   Serial.println(seg3_start);
+   Serial.println("  End3 ");
+   Serial.println(seg3_end);
+   Serial.println("  Activation RPM ");
+   Serial.println(activation_rpm);
+   Serial.println("  SHIFT RPM ");
+   Serial.println(shift_rpm);
+  }
 
   switch (pixelanim)
   {
@@ -648,11 +642,11 @@ void menu()
  
   rotaryval = constrain(rotaryval, 0, 18); 
 
-//Poll the rotary encoder button to enter menu items
-     if (digitalRead(BUTTON_PIN) == LOW){ 
-        delay(250); 
-        menu_enter = 1; 
-      } 
+  //Poll the rotary encoder button to enter menu items
+  if (digitalRead(BUTTON_PIN) == LOW){ 
+    delay(250); 
+    menu_enter = 1; 
+  } 
     
   switch (rotaryval){ 
   
@@ -734,13 +728,13 @@ void menu()
       flclr1 = load_color(c4); 
       flclr2 = load_color(c5); 
       
-      tm1637.set(brightval/2);//skala tm1637 0-7
+      tm1637.set(brightval/2); //tm1637 brightness scale 0-7
       processNumber(brightval);
       tm1637.display(RPMDisp); 
 
       if (testbright == false){
-      testlights(4);
-      testbright = true;
+        testlights(4);
+        testbright = true;
       }
 
 
