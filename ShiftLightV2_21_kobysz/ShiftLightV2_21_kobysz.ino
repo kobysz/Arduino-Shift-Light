@@ -34,7 +34,7 @@ Modified by kobysz at gmail dot com
 
 // Include these libraries 
 #include <Wire.h> 
-#include <Adafruit_LEDBackpack.h> 
+//include <Adafruit_LEDBackpack.h> 
 //include <Adafruit_GFX.h>  - prawdopodobnie niepotrzebne
 #include <Adafruit_NeoPixel.h> 
 #include <EEPROM.h> 
@@ -49,6 +49,7 @@ int NUMPIXELS;
 
 #define RPM_PIN 2 // rpm input pin
 #define LED_PIN 6  // LED strip DIN pin
+#define SND_PIN 7  // piezo pin
 #define DISP_CLK 12 // pins definitions for TM1637 and can be changed to other ports    
 #define DISP_DIO 13 // pins definitions for TM1637 and can be changed to other ports
 #define BUTTON_PIN 4 // rotary encoder button pin
@@ -65,8 +66,11 @@ unsigned int Color(byte r, byte g, byte b)
 } 
 
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(EEPROM.read(11), LED_PIN, NEO_GRB + NEO_KHZ800); 
-Adafruit_7segment matrix = Adafruit_7segment();
+//Adafruit_7segment matrix = Adafruit_7segment();
 TM1637 tm1637(DISP_CLK,DISP_DIO);
+
+//test
+int8_t RPMDisp[] = {0x00,0x00,0x00,0x00};
 
 //const int rpmPin = 2; 
 //const int ledPin = 13; 
@@ -94,9 +98,9 @@ boolean testbright = false;
 //Oil pressure vars
 int op_raw = 0;
 int op_Vin = 5;
-float op_Vout= 0;
-float op_R1= 1000; //1kohm
-float op_R2= 0;
+float op_Vout = 0;
+float op_R1 = 75; //ohm
+float op_R2 = 0;
 float op_buffer = 0;
 
 //array for rpm averaging, filtering comparison
@@ -213,10 +217,10 @@ for (int thisReading = 0; thisReading < numReadings; thisReading++){
 timeoutCounter = timeoutValue;
 buildarrays();
 
-matrix.begin(0x70); 
+//matrix.begin(0x70); 
 strip.begin(); 
 strip.show(); // Initialize all pixels to 'off' 
-tm1637.set();
+tm1637.set(0);
 tm1637.init();
 
 //RPM input
@@ -248,6 +252,7 @@ flclr1 = load_color(c4);
 delay(10); 
 flclr2 = load_color(c5); 
 delay(10); 
+
 } 
 
 
@@ -278,7 +283,7 @@ void loop()
   {
     if (average != 0)
     {
-      if ((rpm-average > 2500) || (average-rpm > 2500))
+      if ((rpm-average > 1000) || (average-rpm > 1000)) //2500
       {                 
         if (DEBUG)
         {
@@ -305,38 +310,32 @@ void loop()
        
   }
 
-  if (display_mode == DISPLAY_RPM) //displays RPMs
-  {
-    if (timeoutCounter > 0)
-    {   
+  
+  if (timeoutCounter > 0)
+  { 
+    if (display_mode == DISPLAY_RPM) //displays RPMs
+    {  
       if (rpm_last > 0 )
       {
         if (DEBUG) { Serial.println(rpm); }
-        if (rpm > 9999)
-        {
-          matrix.println(rpm/10);
-        } else {
-          matrix.println(rpm);
-        }
-        matrix.setBrightness(brightval); 
-        matrix.writeDisplay(); 
+        processNumber(rpm);
+        tm1637.display(RPMDisp);
       }
       else
-      {
-        matrix.clear(); 
-        matrix.writeDisplay(); 
+      { 
+        tm1637.clearDisplay();
       }
-      rpm_last = rpm;             
     }
-    else
-    {
-      rpm = 0;
-      matrix.clear(); 
-      matrix.writeDisplay(); 
-      clearStrip();
-      strip.show(); 
-    }
-  } //tu lub niżej zamknięcie?
+    rpm_last = rpm;             
+  }
+  else
+  {
+    rpm = 0;
+    if (display_mode == DISPLAY_RPM) { tm1637.clearDisplay(); }
+    clearStrip();
+    strip.show(); 
+  }
+
   
   if (timeoutCounter > 0) { timeoutCounter--; }  
 
@@ -346,11 +345,24 @@ void loop()
     op_Vout = (5.0 / 1023.0) * op_raw;    // Calculates the Voltage on th Input PIN
     op_buffer = (op_Vin / op_Vout) - 1;
     op_R2 = op_R1 / op_buffer;
-    //Serial.print("Voltage: ");      //
-    //Serial.println(Vout);           // Outputs the information
-    //Serial.print("R2: ");           //
-    //Serial.println(R2);             //
-    //delay(1000);
+
+    //3-160ohm czujnik 0-10 bar
+    //157ohm/10bar = 15.7 ohm/bar
+    //r2 - 
+    if (op_R2 > 10) 
+    {
+      op_R2 -= 3;
+      int bar = (op_R2 / 15.7) * 10;
+      processNumberBar(bar);
+      tm1637.display(RPMDisp);
+    }
+    else
+    {
+      processNumberBar(0);
+      tm1637.display(RPMDisp);
+    }
+    
+    tm1637.point(POINT_ON);
   }
   
   //shift leds
@@ -602,20 +614,16 @@ if(DEBUG){
       break;
   }
 
-if(DEBUG){
-  for (i = 0; i<NUMPIXELS; i++){
-    Serial.print(rpmtable[i][0]);
-    Serial.print("  ");
-    Serial.print(rpmtable[i][1]);
-    Serial.print("  ");
-    Serial.println(rpmtable[i][2]);  
+  if(DEBUG){
+    for (i = 0; i<NUMPIXELS; i++){
+      Serial.print(rpmtable[i][0]);
+      Serial.print("  ");
+      Serial.print(rpmtable[i][1]);
+      Serial.print("  ");
+      Serial.println(rpmtable[i][2]);  
+    }
   }
 }
-}
-
-
-
-
 
 
 
@@ -626,9 +634,11 @@ if(DEBUG){
 // MENU SYSTEM 
 void menu()
 { 
-
+  tm1637.point(POINT_OFF);
+  //giveTone();
   //this keeps us in the menu 
-  while (menuvar == 1){   
+  while (menuvar == 1)
+  {   
   
   // This little bit calls the rotary encoder   
   int result = rotary_process(); 
@@ -636,7 +646,7 @@ void menu()
   if (result == -128){rotaryval--;}   
   else if (result == 64){rotaryval++;} 
  
-  rotaryval = constrain(rotaryval, 0, 17); 
+  rotaryval = constrain(rotaryval, 0, 18); 
 
 //Poll the rotary encoder button to enter menu items
      if (digitalRead(BUTTON_PIN) == LOW){ 
@@ -647,45 +657,59 @@ void menu()
   switch (rotaryval){ 
   
     case 0: //Menu Screen. Exiting saves variables to EEPROM 
-      matrix.writeDigitRaw(0,0x39); //e 
-      matrix.writeDigitRaw(1,0x9); //x 
-      matrix.writeDigitRaw(3,0x9); //i 
-      matrix.writeDigitRaw(4,0xF); //t 
+      RPMDisp[0] = 14;//d
+      RPMDisp[1] = 19;//i
+      RPMDisp[2] = 5; //s
+      RPMDisp[3] = 26;//p
       
-      //Poll the Button to exit 
-      if (menu_enter == 1){ 
-        delay(250); 
-        rotaryval = 0; 
-        menuvar=0;
-        menu_enter = 0;  
+      while (menu_enter == 1){ 
         
-        writeEEPROM(); 
-        getEEPROM(); 
-        buildarrays();
-        
-        //Ascend strip 
-        for (int i=0; i<(NUMPIXELS/2)+1; i++){ 
-        strip.setPixelColor(i, strip.Color(0, 0, 25)); 
-        strip.setPixelColor(NUMPIXELS-i, strip.Color(0, 0, 25)); 
-        strip.show(); 
-        delay(35); 
-        } 
-        // Descend Strip 
-        for (int i=0; i<(NUMPIXELS/2)+1; i++){ 
-        strip.setPixelColor(i, strip.Color(0, 0, 0)); 
-        strip.setPixelColor(NUMPIXELS-i, strip.Color(0, 0, 0)); 
-        strip.show(); 
-        delay(35); 
-        }   
-      }     
+        int coloradjust1 = rotary_process();         
+        if (coloradjust1 == -128){display_mode--;}           
+        if (coloradjust1 == 64){display_mode++;}                   
+        display_mode = constrain(display_mode, 1, 2); 
+
+
+        switch (display_mode){
+          case 1:
+              RPMDisp[0] = 39;//
+              RPMDisp[1] = 28;//r
+              RPMDisp[2] = 26;//p
+              RPMDisp[3] = 23;//m
+          break;
+
+          case 2:
+              RPMDisp[0] = 25;//o
+              RPMDisp[1] = 19;//i
+              RPMDisp[2] = 22;//l
+              RPMDisp[3] = 26;//p
+          break;   
+        }
+
+        tm1637.display(RPMDisp);         
+             
+          if (digitalRead(BUTTON_PIN) == LOW){ 
+            delay(250); 
+            menu_enter = 0; 
+            clearStrip(); 
+            strip.show(); 
+            for(int i=0; i<NUMPIXELS+1; i++) { 
+              strip.setPixelColor(i, strip.Color(50, 50, 50)); 
+              strip.show(); 
+              delay(15); 
+              strip.setPixelColor(i, strip.Color(0, 0, 0)); 
+              strip.show(); 
+            }             
+          } 
+        }      
     break; 
     
     
     case 1: //Adjust the global brightness 
-      matrix.writeDigitRaw(0,0x0); // 
-      matrix.writeDigitRaw(1,0x7C); //b 
-      matrix.writeDigitRaw(3,0x50); //r 
-      matrix.writeDigitRaw(4,0x78); //t 
+      RPMDisp[0] = 39;//
+      RPMDisp[1] = 11;//b
+      RPMDisp[2] = 28;//r
+      RPMDisp[3] = 29;//t
             
       while (menu_enter == 1){ 
       
@@ -701,7 +725,7 @@ void menu()
         sb--; 
         testbright = false;
       } 
-      brightval = constrain (brightval, 0, 15); 
+      brightval = constrain(brightval, 0, 15); 
       sb = constrain(sb, 1, 15); 
       
       color1 = load_color(c1); 
@@ -710,9 +734,9 @@ void menu()
       flclr1 = load_color(c4); 
       flclr2 = load_color(c5); 
       
-      matrix.setBrightness(brightval); 
-      matrix.println(brightval); 
-      matrix.writeDisplay(); 
+      tm1637.set(brightval/2);//skala tm1637 0-7
+      processNumber(brightval);
+      tm1637.display(RPMDisp); 
 
       if (testbright == false){
       testlights(4);
@@ -739,11 +763,10 @@ void menu()
    
     
     case 3: // ACTIVATION RPM 
-      matrix.writeDigitRaw(0,0x0); // 
-      matrix.writeDigitRaw(1,0x77); //A 
-      matrix.writeDigitRaw(3,0x39); //C 
-      matrix.writeDigitRaw(4,0x78); //t 
-      
+      RPMDisp[0] = 39;//
+      RPMDisp[1] = 10;//a
+      RPMDisp[2] = 13;//c
+      RPMDisp[3] = 29;//t
 
       while (menu_enter == 1){      
         int coloradjust1 = rotary_process(); 
@@ -752,15 +775,15 @@ void menu()
         if (coloradjust1 == 64){activation_rpm=activation_rpm+10;}         
         activation_rpm = constrain(activation_rpm, 0, 20000); 
         
-      if (activation_rpm<9999){        
-        matrix.println(activation_rpm); 
-        strip.setPixelColor(0, strip.Color(0, 0, 0));
+      if (activation_rpm<9999){
+          processNumber(activation_rpm);
+          strip.setPixelColor(0, strip.Color(0, 0, 0));
         } else {
-        matrix.println(activation_rpm-10000);
-        strip.setPixelColor(0, strip.Color(50, 50, 100));
-       // matrix.writeDigitRaw(2, 0x80);  
+          processNumber(activation_rpm-10000);
+          strip.setPixelColor(0, strip.Color(50, 50, 100));
         }
-        matrix.writeDisplay();         
+        //matrix.writeDisplay();
+        tm1637.display(RPMDisp);      
         strip.show();
         
         if (digitalRead(BUTTON_PIN) == LOW){ 
@@ -781,10 +804,10 @@ void menu()
     
     
     case 4: // SHIFT RPM 
-      matrix.writeDigitRaw(0,0x6D); //S 
-      matrix.writeDigitRaw(1,0x76); //H 
-      matrix.writeDigitRaw(3,0x71); //F 
-      matrix.writeDigitRaw(4,0x78); //t       
+      RPMDisp[0] = 5;//s
+      RPMDisp[1] = 18;//h
+      RPMDisp[2] = 16;//f
+      RPMDisp[3] = 29;//t   
           
       while (menu_enter == 1){ 
               
@@ -795,14 +818,13 @@ void menu()
         shift_rpm = constrain(shift_rpm, 0, 20000); 
 
         if (shift_rpm<9999){        
-        matrix.println(shift_rpm); 
-        strip.setPixelColor(0, strip.Color(0, 0, 0));
+          processNumber(shift_rpm);
+          strip.setPixelColor(0, strip.Color(0, 0, 0));
         } else {
-        matrix.println(shift_rpm-10000);
-        strip.setPixelColor(0, strip.Color(50, 50, 100));
-       // matrix.writeDigitRaw(2, 0x80);  
+          processNumber(shift_rpm-10000);
+          strip.setPixelColor(0, strip.Color(50, 50, 100));
         }
-        matrix.writeDisplay();         
+        tm1637.display(RPMDisp);       
         strip.show(); 
         
         if (digitalRead(BUTTON_PIN) == LOW){ 
@@ -826,10 +848,10 @@ void menu()
 
      case 5:  //RPM SENSE MODE
     //senseoption
-     matrix.writeDigitRaw(0,0x6D); //S
-     matrix.writeDigitRaw(1,0x79); //E
-     matrix.writeDigitRaw(3,0x54); //n
-     matrix.writeDigitRaw(4,0x6D); //S
+      RPMDisp[0] = 5; //s
+      RPMDisp[1] = 15;//e
+      RPMDisp[2] = 24;//n
+      RPMDisp[3] = 5; //s
       
       while (menu_enter == 1){         
         int coloradjust1 = rotary_process();         
@@ -839,21 +861,21 @@ void menu()
 
         switch (senseoption){
           case 1:
-              matrix.writeDigitRaw(0,0x30); //I
-              matrix.writeDigitRaw(1,0x54); //n
-              matrix.writeDigitRaw(3,0x78); //t
-              matrix.writeDigitRaw(4,0x50); //r
+              RPMDisp[0] = 19; //i
+              RPMDisp[1] = 24;//n
+              RPMDisp[2] = 29;//t
+              RPMDisp[3] = 28; //r
           break;
 
           case 2:
-              matrix.writeDigitRaw(0,0x00); //
-              matrix.writeDigitRaw(1,0x00); //
-              matrix.writeDigitRaw(3,0x71); //F
-              matrix.writeDigitRaw(4,0x50); //r
+              RPMDisp[0] = 39; //
+              RPMDisp[1] = 39;//
+              RPMDisp[2] = 16;//f
+              RPMDisp[3] = 28; //r
           break;   
         }
 
-        matrix.writeDisplay();         
+        tm1637.display(RPMDisp);       
            
         if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
@@ -868,11 +890,11 @@ void menu()
             strip.show(); 
           }
 
-       matrix.writeDigitRaw(0,0x7C); //b
-       matrix.writeDigitRaw(1,0x5C); //o 
-       matrix.writeDigitRaw(3,0x5C); //o
-       matrix.writeDigitRaw(4,0x78); //t 
-       matrix.writeDisplay();
+       RPMDisp[0] = 11; //b
+       RPMDisp[1] = 25; //o
+       RPMDisp[2] = 25; //o
+       RPMDisp[3] = 29; //t
+       tm1637.display(RPMDisp);
        delay(1000);
        writeEEPROM(); 
        resetFunc();
@@ -882,10 +904,10 @@ void menu()
 
 
      case 6:  //SMOOTHING (conditioning)
-     matrix.writeDigitRaw(0,0x39); //c
-     matrix.writeDigitRaw(1,0x5C); //o'
-     matrix.writeDigitRaw(3,0x54); //n'
-     matrix.writeDigitRaw(4,0x5E); //d
+      RPMDisp[0] = 12; //c
+      RPMDisp[1] = 25; //o
+      RPMDisp[2] = 24; //n
+      RPMDisp[3] = 14; //d
       
       while (menu_enter == 1){ 
         
@@ -896,18 +918,18 @@ void menu()
 
 
       if (smoothing){
-              matrix.writeDigitRaw(0,0x0); //
-               matrix.writeDigitRaw(1,0x0); // 
-               matrix.writeDigitRaw(3,0x3F); // O
-               matrix.writeDigitRaw(4,0x54); //n 
+              RPMDisp[0] = 39; //
+              RPMDisp[1] = 39; //
+              RPMDisp[2] = 25; //o
+              RPMDisp[3] = 24; //n
         
       }else{
-              matrix.writeDigitRaw(0,0x0); //
-               matrix.writeDigitRaw(1,0x3F); //O
-               matrix.writeDigitRaw(3,0x71); //F
-               matrix.writeDigitRaw(4,0x71); //F 
+              RPMDisp[0] = 39; //
+              RPMDisp[1] = 25; //o
+              RPMDisp[2] = 16; //f
+              RPMDisp[3] = 16; //f
        }
-        matrix.writeDisplay();         
+        tm1637.display(RPMDisp);         
            
         if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
@@ -927,10 +949,10 @@ void menu()
 
 
  case 7:  // PULSES PER REVOLUTION
-     matrix.writeDigitRaw(0,0x00); //
-     matrix.writeDigitRaw(1,0x73); //P
-     matrix.writeDigitRaw(3,0x73); //P
-     matrix.writeDigitRaw(4,0x50); //r 
+      RPMDisp[0] = 39; //
+      RPMDisp[1] = 26; //p
+      RPMDisp[2] = 26; //p
+      RPMDisp[3] = 28; //r
       
       while (menu_enter == 1){ 
         
@@ -940,9 +962,11 @@ void menu()
         cal = constrain(cal, 1, 36); 
         
         if (prev_cal != cal){
-          matrix.println(cal);
-          matrix.setBrightness(brightval/3); 
-          matrix.writeDisplay();   
+          //matrix.println(cal);
+          //matrix.setBrightness(brightval/3); 
+          //matrix.writeDisplay();
+          processNumber(cal);
+          tm1637.display(RPMDisp);
           prev_cal = cal;
           delay(500);     
         }
@@ -960,14 +984,8 @@ void menu()
           break;  
         }
         
-        if (rpm > 9999)
-        {
-          matrix.println(rpm/10);
-        } else {
-          matrix.println(rpm);
-        }
-        matrix.setBrightness(brightval);
-        matrix.writeDisplay();         
+        processNumber(rpm);
+        tm1637.display(RPMDisp);        
    
        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
@@ -986,16 +1004,11 @@ void menu()
      break;
 
 
-
-
-
-
-
      case 8:  // NUMBER OF LEDS
-     matrix.writeDigitRaw(0,0x54); //n
-     matrix.writeDigitRaw(1,0x38); //L
-     matrix.writeDigitRaw(3,0x79); //E
-     matrix.writeDigitRaw(4,0x5E); //D 
+      RPMDisp[0] = 24; //n
+      RPMDisp[1] = 22; //l
+      RPMDisp[2] = 15; //e
+      RPMDisp[3] = 14; //d
       
       while (menu_enter == 1){ 
         
@@ -1004,8 +1017,8 @@ void menu()
         if (coloradjust1 == 64){NUMPIXELS++;}                   
         NUMPIXELS = constrain(NUMPIXELS, 0, 32); 
 
-        matrix.println(NUMPIXELS); 
-        matrix.writeDisplay();         
+        processNumber(NUMPIXELS);
+        tm1637.display(RPMDisp); 
    
        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
@@ -1020,11 +1033,11 @@ void menu()
             strip.show(); 
           }
 
-       matrix.writeDigitRaw(0,0x7C); //b
-       matrix.writeDigitRaw(1,0x5C); //o 
-       matrix.writeDigitRaw(3,0x5C); //o
-       matrix.writeDigitRaw(4,0x78); //t 
-       matrix.writeDisplay();
+       RPMDisp[0] = 11; //b
+       RPMDisp[1] = 25; //o
+       RPMDisp[2] = 25; //o
+       RPMDisp[3] = 29; //t
+       tm1637.display(RPMDisp);
        delay(1000);
        writeEEPROM(); 
        resetFunc();
@@ -1033,11 +1046,11 @@ void menu()
      break;    
     
  
-     case 9:  // Color Segmentation                    
-     matrix.writeDigitRaw(0,0x00); //
-     matrix.writeDigitRaw(1,0x6D); //S 
-     matrix.writeDigitRaw(3,0x79); //E
-     matrix.writeDigitRaw(4,0x3D); //G 
+     case 9:  // Color Segmentation
+      RPMDisp[0] = 39;//
+      RPMDisp[1] = 5; //s
+      RPMDisp[2] = 15;//e
+      RPMDisp[3] = 17;//g
       
       if (menu_enter == 1){
           build_segments();
@@ -1061,18 +1074,20 @@ break;
 
      case 10:  // PIXEL ANIMATION MODE
 
-matrix.writeDigitRaw(0,0x77); //A 
-matrix.writeDigitRaw(1,0x54); //n
-matrix.writeDigitRaw(3,0x10); //i 
-matrix.writeDigitRaw(4,0x15); //m
+      RPMDisp[0] = 10; //a
+      RPMDisp[1] = 24; //n
+      RPMDisp[2] = 19; //i
+      RPMDisp[3] = 23; //m
     
       while (menu_enter == 1){        
         int coloradjust1 = rotary_process();         
         if (coloradjust1 == -128){pixelanim--;} 
         if (coloradjust1 == 64){pixelanim++;}         
         pixelanim = constrain(pixelanim, 1, 3);        
-        matrix.println(pixelanim); 
-        matrix.writeDisplay(); 
+        //matrix.println(pixelanim); 
+        //matrix.writeDisplay(); 
+        processNumber(pixelanim);
+        tm1637.display(RPMDisp); 
                 
           if (prev_animation != pixelanim){
            if(DEBUG){ Serial.println("Animation Change");}
@@ -1104,36 +1119,36 @@ matrix.writeDigitRaw(4,0x15); //m
 
         
         if (digitalRead(BUTTON_PIN) == LOW){           
-          delay(250);
-          menu_enter = 0;
-          clearStrip(); 
-          strip.show(); 
-       matrix.writeDigitRaw(0,0x50); //r
-       matrix.writeDigitRaw(1,0x79); //E 
-       matrix.writeDigitRaw(3,0x5E); //d
-       matrix.writeDigitRaw(4,0x5C); //o 
-       matrix.writeDisplay();
-       delay(1000);
-       matrix.writeDigitRaw(0,0x00); //
-       matrix.writeDigitRaw(1,0x6D); //S 
-       matrix.writeDigitRaw(3,0x79); //E
-       matrix.writeDigitRaw(4,0x3D); //G 
-       matrix.writeDisplay();
-       delay(1000);
-       matrix.writeDigitRaw(0,0x00); //
-       matrix.writeDigitRaw(1,0x00); //
-       matrix.writeDigitRaw(3,0x00); //
-       matrix.writeDigitRaw(4,0x00); //
-       matrix.writeDisplay();
-       delay(500);
-       build_segments();
-          for(int i=0; i<NUMPIXELS+1; i++) { 
-            strip.setPixelColor(i, color1); 
-            strip.show(); 
-            delay(15); 
-            strip.setPixelColor(i, strip.Color(0, 0, 0)); 
-            strip.show(); 
-          }
+           delay(250);
+           menu_enter = 0;
+           clearStrip(); 
+           strip.show(); 
+           RPMDisp[0] = 28; //r
+           RPMDisp[1] = 15; //e
+           RPMDisp[2] = 14; //d
+           RPMDisp[3] = 25; //o
+           tm1637.display(RPMDisp);
+           delay(1000);
+           RPMDisp[0] = 39; //
+           RPMDisp[1] = 5; //s
+           RPMDisp[2] = 15; //e
+           RPMDisp[3] = 17; //g
+           tm1637.display(RPMDisp);
+           delay(1000);
+           RPMDisp[0] = 39; //
+           RPMDisp[1] = 39; //
+           RPMDisp[2] = 39; //
+           RPMDisp[3] = 39; //
+           tm1637.display(RPMDisp);
+           delay(500);
+           build_segments();
+           for(int i=0; i<NUMPIXELS+1; i++) { 
+             strip.setPixelColor(i, color1); 
+             strip.show(); 
+             delay(15); 
+             strip.setPixelColor(i, strip.Color(0, 0, 0)); 
+             strip.show(); 
+           }
      }        
     } 
    break;  
@@ -1141,10 +1156,10 @@ matrix.writeDigitRaw(4,0x15); //m
         
     
     case 11: //Adjust Color #1     
-      matrix.writeDigitRaw(0,0x39); //C 
-      matrix.writeDigitRaw(1,0x38); //L 
-      matrix.writeDigitRaw(3,0x33); //R 
-      matrix.writeDigitRaw(4,0x6); //1 
+      RPMDisp[0] = 12; //c
+      RPMDisp[1] = 22; //l
+      RPMDisp[2] = 28; //r
+      RPMDisp[3] = 1;  //1
       
      while (menu_enter == 1){ 
         
@@ -1179,10 +1194,10 @@ matrix.writeDigitRaw(4,0x15); //m
     
     
     case 12: //Adjust Color #2 
-      matrix.writeDigitRaw(0,0x39); //C 
-      matrix.writeDigitRaw(1,0x38); //L 
-      matrix.writeDigitRaw(3,0x33); //R 
-      matrix.writeDigitRaw(4,0x5B); //2 
+      RPMDisp[0] = 12; //c
+      RPMDisp[1] = 22; //l
+      RPMDisp[2] = 28; //r
+      RPMDisp[3] = 2;  //2
            
       while (menu_enter == 1){ 
       
@@ -1217,10 +1232,10 @@ matrix.writeDigitRaw(4,0x15); //m
     break; 
     
     case 13: //Adjust Color #3 
-      matrix.writeDigitRaw(0,0x39); //C 
-      matrix.writeDigitRaw(1,0x38); //L 
-      matrix.writeDigitRaw(3,0x33); //R 
-      matrix.writeDigitRaw(4,0x4F); //3 
+      RPMDisp[0] = 12; //c
+      RPMDisp[1] = 22; //l
+      RPMDisp[2] = 28; //r
+      RPMDisp[3] = 3;  //3
             
       while (menu_enter == 1){       
         int coloradjust1 = rotary_process();         
@@ -1253,10 +1268,11 @@ matrix.writeDigitRaw(4,0x15); //m
     break; 
     
     case 14: //Adjust Color #4 
-      matrix.writeDigitRaw(0,0x6D); //S 
-      matrix.writeDigitRaw(1,0x39); //C 
-      matrix.writeDigitRaw(3,0x0); // 
-      matrix.writeDigitRaw(4,0x6); //1 
+      RPMDisp[0] = 5; //s
+      RPMDisp[1] = 12; //c
+      RPMDisp[2] = 39; //
+      RPMDisp[3] = 1;  //1
+      
             
       while (menu_enter == 1){       
         int coloradjust1 = rotary_process();         
@@ -1290,10 +1306,10 @@ matrix.writeDigitRaw(4,0x15); //m
     break; 
     
     case 15: //Adjust Color #5 
-      matrix.writeDigitRaw(0,0x6D); //S 
-      matrix.writeDigitRaw(1,0x39); //C 
-      matrix.writeDigitRaw(3,0x0); // 
-      matrix.writeDigitRaw(4,0x5B); //2 
+      RPMDisp[0] = 5; //s
+      RPMDisp[1] = 12; //c
+      RPMDisp[2] = 39; //
+      RPMDisp[3] = 2;  //2
       
       while (menu_enter == 1){       
         int coloradjust1 = rotary_process();        
@@ -1330,10 +1346,10 @@ matrix.writeDigitRaw(4,0x15); //m
 
     
     case 16:   //DEBUG MODE
-      matrix.writeDigitRaw(0,0x5E); //d 
-      matrix.writeDigitRaw(1,0x79); //E 
-      matrix.writeDigitRaw(3,0x7C); //b
-      matrix.writeDigitRaw(4,0x6F); //g 
+      RPMDisp[0] = 14; //d
+      RPMDisp[1] = 15; //e
+      RPMDisp[2] = 11; //b
+      RPMDisp[3] = 17;  //g
       
  while (menu_enter == 1){       
         int coloradjust1 = rotary_process();        
@@ -1342,20 +1358,19 @@ matrix.writeDigitRaw(4,0x15); //m
         DEBUG = constrain(DEBUG, 0, 1); 
          
       if (DEBUG== 1){
-               matrix.writeDigitRaw(0,0x0); //
-               matrix.writeDigitRaw(1,0x0); // 
-               matrix.writeDigitRaw(3,0x3F); // O
-               matrix.writeDigitRaw(4,0x54); //n 
+               RPMDisp[0] = 39; //
+               RPMDisp[1] = 39; //
+               RPMDisp[2] = 25; //o
+               RPMDisp[3] = 24;  //n
         
       }else{
-              matrix.writeDigitRaw(0,0x0); //
-               matrix.writeDigitRaw(1,0x3F); //O
-               matrix.writeDigitRaw(3,0x71); //F
-               matrix.writeDigitRaw(4,0x71); //F 
-        
+               RPMDisp[0] = 39; //
+               RPMDisp[1] = 25; //o
+               RPMDisp[2] = 16; //f
+               RPMDisp[3] = 16;  //f
       }
 
-    matrix.writeDisplay(); 
+    tm1637.display(RPMDisp);
                  
         if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
@@ -1375,11 +1390,10 @@ matrix.writeDigitRaw(4,0x15); //m
 
 
     case 17:   //RESET
-      matrix.writeDigitRaw(0,0x00); //
-      matrix.writeDigitRaw(1,0x50); //r
-      matrix.writeDigitRaw(3,0x6D); //S
-      matrix.writeDigitRaw(4,0x78); //t
-
+       RPMDisp[0] = 39; //
+       RPMDisp[1] = 28; //r
+       RPMDisp[2] = 5; //s
+       RPMDisp[3] = 29;  //t
       
  while (menu_enter == 1){       
         int coloradjust1 = rotary_process();        
@@ -1388,20 +1402,19 @@ matrix.writeDigitRaw(4,0x15); //m
         rst = constrain(rst, 0, 1); 
         
       if (rst == 1){
-              matrix.writeDigitRaw(0,0x0); //
-              matrix.writeDigitRaw(1,0x6E); // Y
-              matrix.writeDigitRaw(3,0x79); // E
-              matrix.writeDigitRaw(4,0x6D); //S
+               RPMDisp[0] = 39; //
+               RPMDisp[1] = 32; //y
+               RPMDisp[2] = 15; //e
+               RPMDisp[3] = 5; //s
         
       }else{
-               matrix.writeDigitRaw(0,0x0); //
-               matrix.writeDigitRaw(1,0x0); //
-               matrix.writeDigitRaw(3,0x54); //n
-               matrix.writeDigitRaw(4,0x5C); //O 
-        
+               RPMDisp[0] = 39; //
+               RPMDisp[1] = 39; //
+               RPMDisp[2] = 24; //n
+               RPMDisp[3] = 25; //o
       }
 
-    matrix.writeDisplay(); 
+     tm1637.display(RPMDisp);
  
                 
         if (digitalRead(BUTTON_PIN) == LOW){ 
@@ -1418,17 +1431,17 @@ matrix.writeDigitRaw(4,0x15); //m
           }
                    if (rst ==1){
 
-               matrix.writeDigitRaw(0,0x0); //
-               matrix.writeDigitRaw(1,0x7C); // b
-               matrix.writeDigitRaw(3,0x6E); // Y
-               matrix.writeDigitRaw(4,0x79); //E
-               matrix.writeDisplay(); 
+               //matrix.writeDigitRaw(0,0x0); //
+               //matrix.writeDigitRaw(1,0x7C); // b
+               //matrix.writeDigitRaw(3,0x6E); // Y
+               //matrix.writeDigitRaw(4,0x79); //E
+               //matrix.writeDisplay(); 
                delay(500);
-               matrix.writeDigitRaw(0,0x5E); // d
-               matrix.writeDigitRaw(1,0x77); // a
-               matrix.writeDigitRaw(3,0x78); // t
-               matrix.writeDigitRaw(4,0x77); //a
-               matrix.writeDisplay(); 
+               //matrix.writeDigitRaw(0,0x5E); // d
+               //matrix.writeDigitRaw(1,0x77); // a
+               //matrix.writeDigitRaw(3,0x78); // t
+               //matrix.writeDigitRaw(4,0x77); //a
+               //matrix.writeDisplay(); 
                delay(500);
 
                for (int i = 0; i < 512; i++){EEPROM.write(i, 0);}
@@ -1437,21 +1450,109 @@ matrix.writeDigitRaw(4,0x15); //m
             }       
         } 
       }  
+      break;
+
+
+      case 18: //Menu Screen. Exiting saves variables to EEPROM 
+      RPMDisp[0] = 15;//e
+      RPMDisp[1] = 18;//x
+      RPMDisp[2] = 19;//i
+      RPMDisp[3] = 29;//t
+      
+      //Poll the Button to exit 
+      if (menu_enter == 1){
+        //tm1637.clearDisplay();
+        delay(250); 
+        rotaryval = 0; 
+        menuvar=0;
+        menu_enter = 0;  
+        
+        writeEEPROM(); 
+        getEEPROM(); 
+        buildarrays();
+        
+        //Ascend strip 
+        for (int i=0; i<(NUMPIXELS/2)+1; i++){ 
+        strip.setPixelColor(i, strip.Color(0, 0, 25)); 
+        strip.setPixelColor(NUMPIXELS-i, strip.Color(0, 0, 25)); 
+        strip.show(); 
+        delay(35); 
+        } 
+        // Descend Strip 
+        for (int i=0; i<(NUMPIXELS/2)+1; i++){ 
+        strip.setPixelColor(i, strip.Color(0, 0, 0)); 
+        strip.setPixelColor(NUMPIXELS-i, strip.Color(0, 0, 0)); 
+        strip.show(); 
+        delay(35); 
+        }   
+      }     
     break;
           
     } 
-   matrix.writeDisplay();  
+    tm1637.display(RPMDisp); 
   } 
-} 
-
-
-
-
+} //****** end MENU **********
 
 
 /*************************
  * SUBROUTINES
  *************************/
+void processNumber(long n)
+{
+  if (n > 9999) {
+    n = n/10;
+  }
+  if (n > 999) {
+    //int n = rpm;
+    RPMDisp[0] = n / 1000;
+    n -= RPMDisp[0] * 1000;
+    RPMDisp[1] = n / 100;
+    n -= RPMDisp[1] * 100;
+    RPMDisp[2] = n / 10;
+    n -= RPMDisp[2] * 10;
+    RPMDisp[3] = n;
+  } else if (n > 99) {
+    RPMDisp[0] = 39;
+    RPMDisp[1] = n / 100;
+    n -= RPMDisp[1] * 100;
+    RPMDisp[2] = n / 10;
+    n -= RPMDisp[2] * 10;
+    RPMDisp[3] = n;
+  } else if (n > 9) {
+    RPMDisp[0] = 39;
+    RPMDisp[1] = 39;
+    RPMDisp[2] = n / 10;
+    n -= RPMDisp[2] * 10;
+    RPMDisp[3] = n;
+  } else {
+    RPMDisp[0] = 39;
+    RPMDisp[1] = 39;
+    RPMDisp[2] = 39;
+    RPMDisp[3] = n;
+  }
+}
+void processNumberBar(int n)
+{
+  if (n > 9) {
+    RPMDisp[0] = 39;
+    RPMDisp[1] = n / 10;
+    n -= RPMDisp[1] * 10;
+    RPMDisp[2] = n;
+    RPMDisp[3] = 11;
+  } else {
+    RPMDisp[0] = 39;
+    RPMDisp[1] = 0;
+    RPMDisp[2] = n;
+    RPMDisp[3] = 11;
+  }
+}
+
+void giveTone()
+{
+  tone(SND_PIN, 440);
+  delay(100);
+  noTone(SND_PIN);
+}
 
 //This subroutine reads the stored variables from memory 
 void getEEPROM()
@@ -1662,6 +1763,7 @@ void check_first_run()
     smoothing = 1; 
     NUMPIXELS = 8;
     //rpmscaler = EEPROM.read(12);  
+    rpmscaler = 2;
     DEBUG = 0; 
     seg1_start = 0; 
     seg1_end = 3; 
@@ -1683,8 +1785,10 @@ void build_segments(){
 if (pixelanim == 3){seg_mover = NUMPIXELS-1;}
   
 while (current_seg_number<4){
-      matrix.println(current_seg_number);
-      matrix.writeDisplay();    
+      //matrix.println(current_seg_number);
+      //matrix.writeDisplay();
+      processNumber(current_seg_number);
+      tm1637.display(RPMDisp);
 
       int coloradjust1 = rotary_process();         
         if (coloradjust1 == -128){seg_mover--;} 
