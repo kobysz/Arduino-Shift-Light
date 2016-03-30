@@ -343,7 +343,7 @@ void loop()
     op_raw = analogRead(OIL_PRESS_PIN);    // Reads the Input PIN
     op_Vout = (5.0 / 1023.0) * op_raw;    // Calculates the Voltage on th Input PIN
     op_buffer = (op_Vin / op_Vout) - 1;
-    op_R2 = op_R1 / op_buffer; //sensor resistance
+    op_R2 = op_R1 / op_buffer; //sensor resistance 3-160 ohm
 
     if (op_R2 > 10) 
     {
