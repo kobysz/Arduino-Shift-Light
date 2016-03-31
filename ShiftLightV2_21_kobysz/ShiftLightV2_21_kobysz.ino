@@ -35,6 +35,7 @@ Modified by kobysz at gmail dot com
 // Include these libraries 
 #include <Wire.h> 
 #include <Adafruit_NeoPixel.h> 
+#include <LiquidCrystal_I2C.h>
 #include <EEPROM.h> 
 #include <EEPROMAnything.h> 
 #include <FreqMeasure.h>
@@ -65,6 +66,7 @@ unsigned int Color(byte r, byte g, byte b)
 
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(EEPROM.read(11), LED_PIN, NEO_GRB + NEO_KHZ800); 
 TM1637 tm1637(DISP_CLK,DISP_DIO);
+LiquidCrystal_I2C  lcd(0x27,2,1,0,4,5,6,7); // 0x27 is the I2C bus address for an unmodified backpack
 
 //display table
 int8_t RPMDisp[] = {0x00,0x00,0x00,0x00};
@@ -219,6 +221,10 @@ void setup() {
   strip.show(); // Initialize all pixels to 'off' 
   tm1637.set(0);
   tm1637.init();
+  // activate LCD module
+  lcd.begin (16,2); // for 16 x 2 LCD module
+  lcd.setBacklightPin(3,POSITIVE);
+  lcd.setBacklight(HIGH);
 
   //RPM input
   pinMode(RPM_PIN, INPUT);
@@ -250,6 +256,12 @@ void setup() {
   flclr2 = load_color(c5); 
   delay(10); 
 
+  lcd.home (); // set cursor to 0,0
+  lcd.print("  NISSAN 200SX  "); 
+  //lcd.setCursor (0,1);        // go to start of 2nd line
+  //lcd.print(millis());
+  delay(2000);
+  lcd.clear();
 } 
 
 
@@ -338,22 +350,30 @@ void loop()
 
   if (display_mode == DISPLAY_OILPRESS) //displays OIL PRESSURE
   {
+    lcd.setCursor (0,0);
+    lcd.print("Oil pressure:");
+    
     op_raw = analogRead(OIL_PRESS_PIN);    // Reads the Input PIN
     op_Vout = (5.0 / 1023.0) * op_raw;    // Calculates the Voltage on th Input PIN
     op_buffer = (op_Vin / op_Vout) - 1;
     op_R2 = op_R1 / op_buffer; //sensor resistance 3-160 ohm
 
-    if (op_R2 > 10) 
+    if (op_R2 > 10 && op_R2 < 200) //there must be top condition with sensors that has inf ohm on 0 bar
     {
       op_R2 -= 3;
       int bar = (op_R2 / 15.7) * 10;
+      float barf = op_R2 / 15.7;
       processNumberBar(bar);
       tm1637.display(RPMDisp);
+      lcd.setCursor(13,1);
+      lcd.print(barf);
     }
     else
     {
       processNumberBar(0);
       tm1637.display(RPMDisp);
+      lcd.setCursor (13,1);
+      lcd.print("0.0");
     }
     
     tm1637.point(POINT_ON);
@@ -627,6 +647,7 @@ void buildarrays(){
 void menu()
 { 
   tm1637.point(POINT_OFF);
+  lcd.clear();
   //giveTone();
   //this keeps us in the menu 
   while (menuvar == 1)
@@ -653,6 +674,10 @@ void menu()
       RPMDisp[1] = 19;//i
       RPMDisp[2] = 5; //s
       RPMDisp[3] = 26;//p
+      lcd.setCursor(0,0);
+      lcd.print("Display mode");
+      lcd.setCursor(0,1);
+      lcd.print("[ENTER]         ");
       
       while (menu_enter == 1){ 
         
@@ -668,6 +693,8 @@ void menu()
               RPMDisp[1] = 28;//r
               RPMDisp[2] = 26;//p
               RPMDisp[3] = 23;//m
+              lcd.setCursor(0,1);
+              lcd.print("> RPM         ");
           break;
 
           case 2:
@@ -675,6 +702,8 @@ void menu()
               RPMDisp[1] = 19;//i
               RPMDisp[2] = 22;//l
               RPMDisp[3] = 26;//p
+              lcd.setCursor(0,1);
+              lcd.print("> Oil pressure");
           break;   
         }
 
@@ -702,6 +731,10 @@ void menu()
       RPMDisp[1] = 11;//b
       RPMDisp[2] = 28;//r
       RPMDisp[3] = 29;//t
+      lcd.setCursor(0,0);
+      lcd.print("LED brightness");
+      lcd.setCursor(0,1);
+      lcd.print("[ENTER]         ");
             
       while (menu_enter == 1){ 
       
@@ -730,6 +763,9 @@ void menu()
       processNumber(brightval);
       tm1637.display(RPMDisp); 
 
+      lcd.setCursor (0,1);
+      lcd.print("> " + String(brightval));
+       
       if (testbright == false){
         testlights(4);
         testbright = true;
@@ -1450,10 +1486,13 @@ break;
       RPMDisp[1] = 18;//x
       RPMDisp[2] = 19;//i
       RPMDisp[3] = 29;//t
+      lcd.setCursor (0,0);
+      lcd.print("Save and exit");
       
       //Poll the Button to exit 
       if (menu_enter == 1){
         //tm1637.clearDisplay();
+        lcd.clear();
         delay(250); 
         rotaryval = 0; 
         menuvar=0;
