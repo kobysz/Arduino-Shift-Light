@@ -34,8 +34,6 @@ Modified by kobysz at gmail dot com
 
 // Include these libraries 
 #include <Wire.h> 
-//include <Adafruit_LEDBackpack.h> 
-//include <Adafruit_GFX.h>  - prawdopodobnie niepotrzebne
 #include <Adafruit_NeoPixel.h> 
 #include <EEPROM.h> 
 #include <EEPROMAnything.h> 
