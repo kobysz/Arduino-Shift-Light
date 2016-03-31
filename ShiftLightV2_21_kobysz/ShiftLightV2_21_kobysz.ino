@@ -19,6 +19,7 @@ ARDUINO RPM TACHOMETER MULTI-DISPLAY
 Written by Jonduino (Chippernut)
 10-13-2013 
 
+Modified by kobysz at gmail dot com
 
 ********************* Version NOTES ******************** 
 /* v1.0 BETA 11/17/2013 -- Initial Release 
@@ -33,28 +34,43 @@ Written by Jonduino (Chippernut)
 
 // Include these libraries 
 #include <Wire.h> 
-#include <Adafruit_LEDBackpack.h> 
-#include <Adafruit_GFX.h> 
 #include <Adafruit_NeoPixel.h> 
 #include <EEPROM.h> 
 #include <EEPROMAnything.h> 
 #include <FreqMeasure.h>
+#include <TM1637.h>
 
 
 void(* resetFunc) (void) = 0;
 int DEBUG;
 int NUMPIXELS; 
-#define PIN 6 
+
+#define RPM_PIN 2 // rpm input pin
+#define LED_PIN 6  // LED strip DIN pin
+#define SND_PIN 7  // piezo pin
+#define DISP_CLK 12 // pins definitions for TM1637 and can be changed to other ports    
+#define DISP_DIO 13 // pins definitions for TM1637 and can be changed to other ports
+#define BUTTON_PIN 4 // rotary encoder button pin
+#define ROTARY_PIN1 10 // Arduino pins the encoder is attached to. Attach the center to ground.
+#define ROTARY_PIN2 11 // Arduino pins the encoder is attached to. Attach the center to ground.
+#define OIL_PRESS_PIN 0 // oil pressure sensor pin, other side to (-)
+
+#define DISPLAY_RPM 1
+#define DISPLAY_OILPRESS 2
+
 unsigned int Color(byte r, byte g, byte b) 
 { 
-return( ((unsigned int)g & 0x1F )<<10 | ((unsigned int)b & 0x1F)<<5 | (unsigned int)r & 0x1F); 
+  return( ((unsigned int)g & 0x1F )<<10 | ((unsigned int)b & 0x1F)<<5 | (unsigned int)r & 0x1F); 
 } 
 
-Adafruit_NeoPixel strip = Adafruit_NeoPixel(EEPROM.read(11), PIN, NEO_GRB + NEO_KHZ800); 
-Adafruit_7segment matrix = Adafruit_7segment(); 
+Adafruit_NeoPixel strip = Adafruit_NeoPixel(EEPROM.read(11), LED_PIN, NEO_GRB + NEO_KHZ800); 
+TM1637 tm1637(DISP_CLK,DISP_DIO);
 
-const int rpmPin = 2; 
-const int ledPin = 13; 
+//display table
+int8_t RPMDisp[] = {0x00,0x00,0x00,0x00};
+
+//const int rpmPin = 2; 
+//const int ledPin = 13; 
 const int sensorInterrupt = 0; 
 const int timeoutValue = 10; 
 volatile unsigned long lastPulseTime; 
@@ -63,11 +79,11 @@ volatile int timeoutCounter;
 long rpm;
 long rpm_last; 
 int activation_rpm; 
-int shift_rpm; 
+int shift_rpm;
 int menu_enter = 0; 
 
-     int current_seg_number = 1;
-     int seg_mover = 0;
+int current_seg_number = 1;
+int seg_mover = 0;
 
 long previousMillis = 0;
 long shiftinterval = 50;
@@ -75,6 +91,14 @@ boolean flashbool = true;
 int prev_animation;
 int prev_color;
 boolean testbright = false;
+
+//Oil pressure vars
+int op_raw = 0;
+int op_Vin = 5;
+float op_Vout = 0;
+float op_R1 = 75; //ohm
+float op_R2 = 0;
+float op_buffer = 0;
 
 //array for rpm averaging, filtering comparison
 const int numReadings = 5;
@@ -85,7 +109,8 @@ long average = 0;                // the average
 
 
 //These are stored memory variables for adjusting the (5) colors, activation rpm, shift rpm, brightness 
-//Stored in EEPROM Memory 
+//Stored in EEPROM Memory
+int display_mode; //display mode DISPLAY_RPM | DISPLAY_OILPRESS
 int c1; 
 int c2; 
 int c3; 
@@ -93,7 +118,7 @@ int c4;
 int c5; 
 int brightval; //7-seg brightness 
 int sb; //strip brightness 
-int pixelanim =1;
+int pixelanim = 1;
 int senseoption;
 int smoothing;
 int rpmscaler;
@@ -132,16 +157,11 @@ uint32_t flclr2;
 int rpmtable[32][3];
 
 // ROTARY ENCODER VARIABLES 
-int button_pin = 4; 
 int menuvar; 
 int val; 
 int rotaryval = 0; 
 
-// CONFIGURATION FOR THE ROTARY ENCODER 
-  // Arduino pins the encoder is attached to. Attach the center to ground. 
-  #define ROTARY_PIN1 10 
-  #define ROTARY_PIN2 11 
-  
+  // CONFIGURATION FOR THE ROTARY ENCODER 
   // Use the full-step state table (emits a code at 00 only) 
   const char ttable[7][4] = { 
   {0x0, 0x2, 0x4, 0x0}, {0x3, 0x0, 0x1, 0x40}, 
@@ -152,13 +172,15 @@ int rotaryval = 0;
   
   volatile unsigned char state = 0; 
   
-  char rotary_process() { 
-  char pinstate = (digitalRead(ROTARY_PIN2) << 1) | digitalRead(ROTARY_PIN1); 
-  state = ttable[state][pinstate];
-  return (state & 0xc0);   
+  char rotary_process()
+  { 
+    char pinstate = (digitalRead(ROTARY_PIN2) << 1) | digitalRead(ROTARY_PIN1); 
+    state = ttable[state][pinstate];
+    return (state & 0xc0);   
   }
 
-int check_mem() {
+int check_mem()
+{
   uint8_t * heapptr;
   uint8_t * stackptr;
   stackptr = (uint8_t *)malloc(4);          // use stackptr temporarily
@@ -170,9 +192,9 @@ int check_mem() {
 
 
                               
-                              /*************
-                               * SETUP *
-                              *************/
+/*************
+*   SETUP    *
+*************/
 
 //SETUP TO CONFIGURE THE ARDUINO AND GET IT READY FOR FIRST RUN 
 void setup() {
@@ -180,222 +202,276 @@ void setup() {
  Serial.println("ChipperNut ShiftLight Project. V2."); 
  Serial.println("Prepare for awesome......"); 
 
-//get stored variables 
-getEEPROM();
-check_first_run();
-prev_animation = pixelanim;
+  //get stored variables 
+  getEEPROM();
+  check_first_run();
+  prev_animation = pixelanim;
 
   for (int thisReading = 0; thisReading < numReadings; thisReading++){
     rpmarray[thisReading] = 0;  
   }
 
-timeoutCounter = timeoutValue;
-buildarrays();
+  timeoutCounter = timeoutValue;
+  buildarrays();
+  
+  //matrix.begin(0x70); 
+  strip.begin(); 
+  strip.show(); // Initialize all pixels to 'off' 
+  tm1637.set(0);
+  tm1637.init();
 
-matrix.begin(0x70); 
-strip.begin(); 
-strip.show(); // Initialize all pixels to 'off' 
+  //RPM input
+  pinMode(RPM_PIN, INPUT);
+  //ROTARY ENCODER 
+  pinMode(BUTTON_PIN, INPUT_PULLUP); 
+  pinMode(ROTARY_PIN1, INPUT_PULLUP); 
+  pinMode(ROTARY_PIN2, INPUT_PULLUP); 
 
-//ROTARY ENCODER 
-pinMode(rpmPin, INPUT);
-pinMode(button_pin, INPUT_PULLUP); 
-pinMode(ROTARY_PIN1, INPUT_PULLUP); 
-pinMode(ROTARY_PIN2, INPUT_PULLUP); 
+  //senseoption   1 = Interrupt (pin 2), 2 = FreqMeasure (pin 8) 
+  switch (senseoption){
+    case 1:
+      //attachInterrupt(0, sensorIsr, RISING); 
+      attachInterrupt(digitalPinToInterrupt(RPM_PIN), sensorIsr, RISING);
+    break;
+    case 2: 
+      FreqMeasure.begin();
+    break;  
+  }
 
-//senseoption   1 = Interrupt (pin 2), 2 = FreqMeasure (pin 8) 
-switch (senseoption){
-  case 1:
-    attachInterrupt(0, sensorIsr, RISING); 
-  break;
-  case 2: 
-    FreqMeasure.begin();
-  break;  
-}
+  //translate the stored 255 color variables into meaningful RGB colors 
+  color1 = load_color(c1); 
+  delay(10); 
+  color2 = load_color(c2); 
+  delay(10); 
+  color3 = load_color(c3); 
+  delay(10); 
+  flclr1 = load_color(c4); 
+  delay(10); 
+  flclr2 = load_color(c5); 
+  delay(10); 
 
-//translate the stored 255 color variables into meaningful RGB colors 
-color1 = load_color(c1); 
-delay(10); 
-color2 = load_color(c2); 
-delay(10); 
-color3 = load_color(c3); 
-delay(10); 
-flclr1 = load_color(c4); 
-delay(10); 
-flclr2 = load_color(c5); 
-delay(10); 
 } 
 
 
 
 
 
-                        /*************
-                         * LOOP *
-                        *************/
-void loop() { 
-switch (senseoption){
-  case 1:
-     rpm = long(60e6/cal)/(float)interval;
-  break;
-
-  case 2: 
-    if (FreqMeasure.available()) {
-    rpm = (60/cal)* FreqMeasure.countToFrequency(FreqMeasure.read());
-    timeoutCounter = timeoutValue;
-    }
-  break;  
-}
-
-if (smoothing){
-if (average != 0){
-  if ((rpm-average > 2500) || (average-rpm > 2500)){                 
-      if(DEBUG){
-      Serial.print("FIXED!  ");
-      Serial.println(rpm);  }      
-        rpm = rpm_last;        
+/*************
+ * LOOP *
+*************/
+void loop()
+{ 
+  
+  switch (senseoption)
+  {
+    case 1:
+      rpm = long(60e6/cal)/(float)interval;
+    break;
+  
+    case 2: 
+      if (FreqMeasure.available()) {
+      rpm = (60/cal)* FreqMeasure.countToFrequency(FreqMeasure.read());
+      timeoutCounter = timeoutValue;
       }
-}
-  total= total - rpmarray[index]; 
-  rpmarray[index] = rpm;
-  total= total + rpmarray[index]; 
-  index = index + 1;   
-  if (index >= numReadings){              
-      index = 0;    
-   }                       
-  average = total / numReadings;
- 
-  if(DEBUG){Serial.print("average: ");
-  Serial.println(average);}
-  
-
-rpm = average;
-       
-}
-
-if (timeoutCounter > 0){   
-  if (rpm_last > 0 ){
-      if(DEBUG){Serial.println(rpm); }
-      if (rpm > 9999){ matrix.println(rpm/10);
-      }else{matrix.println(rpm); }
-      matrix.setBrightness(brightval); 
-      matrix.writeDisplay(); 
-    }
-    else{
-      matrix.clear(); 
-      matrix.writeDisplay(); 
-    }
-  rpm_last = rpm;             
-} else {
-  rpm = 0;
-  matrix.clear(); 
-  matrix.writeDisplay(); 
-  clearStrip();
-  strip.show(); 
-}
-  
-if (timeoutCounter > 0){ timeoutCounter--;}  
-
-if (rpm < shift_rpm){
-  int a; 
-  for (a = 0; a<NUMPIXELS; a++){
-    if (rpm>rpmtable[a][0]){
-        switch (rpmtable[a][1]){
-          case 1:
-            strip.setPixelColor(a,color1);
-          break;
-  
-          case 2:
-            strip.setPixelColor(a,color2);  
-          break;
-  
-          case 3:
-             strip.setPixelColor(a,color3);  
-          break;        
-        }
-    } else {
-  strip.setPixelColor(a, strip.Color(0, 0, 0));    
-    }
-   strip.show();    
+    break;  
   }
 
-} else {
-
-  unsigned long currentMillis = millis();
-
-    if(currentMillis - previousMillis > shiftinterval) {
-        previousMillis = currentMillis;   
-        flashbool = !flashbool; 
-
-        if (flashbool == true)
-         for(int i=0; i<NUMPIXELS; i++) { 
-            strip.setPixelColor(i, flclr1); 
-         }
-        else
-         for(int i=0; i<NUMPIXELS; i++) { 
-             strip.setPixelColor(i, flclr2); 
-          }
-    strip.show();
+  if (smoothing)
+  {
+    if (average != 0)
+    {
+      if ((rpm-average > 1000) || (average-rpm > 1000)) //2500
+      {                 
+        if (DEBUG)
+        {
+          Serial.print("FIXED!  ");
+          Serial.println(rpm);
+        }      
+        rpm = rpm_last;        
       }
-}
+    }
+    total= total - rpmarray[index]; 
+    rpmarray[index] = rpm;
+    total= total + rpmarray[index]; 
+    index = index + 1;   
+    if (index >= numReadings)
+    {              
+      index = 0;    
+    }                       
+    average = total / numReadings;
+   
+    if (DEBUG) { Serial.print("average: ");
+    Serial.println(average); }
+    
+    rpm = average;
+       
+  }
+
+  
+  if (timeoutCounter > 0)
+  { 
+    if (display_mode == DISPLAY_RPM) //displays RPMs
+    {  
+      if (rpm_last > 0 )
+      {
+        if (DEBUG) { Serial.println(rpm); }
+        processNumber(rpm);
+        tm1637.display(RPMDisp);
+      }
+      else
+      { 
+        tm1637.clearDisplay();
+      }
+    }
+    rpm_last = rpm;             
+  }
+  else
+  {
+    rpm = 0;
+    if (display_mode == DISPLAY_RPM) { tm1637.clearDisplay(); }
+    clearStrip();
+    strip.show(); 
+  }
+
+  
+  if (timeoutCounter > 0) { timeoutCounter--; }  
+
+  if (display_mode == DISPLAY_OILPRESS) //displays OIL PRESSURE
+  {
+    op_raw = analogRead(OIL_PRESS_PIN);    // Reads the Input PIN
+    op_Vout = (5.0 / 1023.0) * op_raw;    // Calculates the Voltage on th Input PIN
+    op_buffer = (op_Vin / op_Vout) - 1;
+    op_R2 = op_R1 / op_buffer; //sensor resistance 3-160 ohm
+
+    if (op_R2 > 10) 
+    {
+      op_R2 -= 3;
+      int bar = (op_R2 / 15.7) * 10;
+      processNumberBar(bar);
+      tm1637.display(RPMDisp);
+    }
+    else
+    {
+      processNumberBar(0);
+      tm1637.display(RPMDisp);
+    }
+    
+    tm1637.point(POINT_ON);
+  }
+  
+  //shift leds
+  if (rpm < shift_rpm)
+  {
+    int a; 
+    for (a = 0; a<NUMPIXELS; a++){
+      if (rpm>rpmtable[a][0]){
+          switch (rpmtable[a][1]){
+            case 1:
+              strip.setPixelColor(a,color1);
+            break;
+    
+            case 2:
+              strip.setPixelColor(a,color2);  
+            break;
+    
+            case 3:
+               strip.setPixelColor(a,color3);  
+            break;        
+          }
+      } else {
+    strip.setPixelColor(a, strip.Color(0, 0, 0));    
+      }
+     strip.show();    
+    }
+  
+  }
+  else
+  {
+    unsigned long currentMillis = millis();
+  
+    if (currentMillis - previousMillis > shiftinterval)
+    {
+      previousMillis = currentMillis;   
+      flashbool = !flashbool; 
+  
+      if (flashbool == true)
+      {
+        for(int i=0; i<NUMPIXELS; i++) { 
+          strip.setPixelColor(i, flclr1); 
+        }
+      }
+      else
+      {
+        for(int i=0; i<NUMPIXELS; i++) { 
+          strip.setPixelColor(i, flclr2); 
+        }
+      }
+    strip.show();
+    }
+    
+  }
    
 
   //Poll the Button, if pushed, cue animation and enter menu subroutine 
-  if (digitalRead(button_pin) == LOW){ 
+  if (digitalRead(BUTTON_PIN) == LOW){ 
+    
     delay(250); 
     clearStrip(); 
   
-  //Ascend strip 
-  for (int i=0; i<(NUMPIXELS/2)+1; i++){ 
-    strip.setPixelColor(i, strip.Color(0, 0, 25)); 
-    strip.setPixelColor(NUMPIXELS-i, strip.Color(0, 0, 25)); 
-    strip.show(); 
-  delay(35); 
-  } 
-  // Descend Strip 
-  for (int i=0; i<(NUMPIXELS/2)+1; i++){ 
-    strip.setPixelColor(i, strip.Color(0, 0, 0)); 
-    strip.setPixelColor(NUMPIXELS-i, strip.Color(0, 0, 0)); 
-    strip.show(); 
-    delay(35); 
+    //Ascend strip 
+    for (int i=0; i<(NUMPIXELS/2)+1; i++)
+    { 
+      strip.setPixelColor(i, strip.Color(0, 0, 25)); 
+      strip.setPixelColor(NUMPIXELS-i, strip.Color(0, 0, 25)); 
+      strip.show(); 
+      delay(35); 
+    } 
+    // Descend Strip 
+    for (int i=0; i<(NUMPIXELS/2)+1; i++)
+    { 
+      strip.setPixelColor(i, strip.Color(0, 0, 0)); 
+      strip.setPixelColor(NUMPIXELS-i, strip.Color(0, 0, 0)); 
+      strip.show(); 
+      delay(35); 
+    } 
+  
+    menuvar=1; 
+    menu(); 
   } 
   
-  menuvar=1; 
-  menu(); 
-  } 
-} 
+} //end loop 
 
 
 
 
 void buildarrays(){
-                   
-int x;  //rpm increment
-int y;  //starting point pixel address
-int ya; // second starting point pixel address (for middle-out animation only)
-int i;  //temporary for loop variable
+  int x;  //rpm increment
+  int y;  //starting point pixel address
+  int ya; // second starting point pixel address (for middle-out animation only)
+  int i;  //temporary for loop variable
+  if(DEBUG){
+   Serial.println("PIXELANIM   ");
+   Serial.println(pixelanim);
+   Serial.println("  Start1 ");
+   Serial.println(seg1_start);
+   Serial.println("  End1 ");
+   Serial.println(seg1_end);
+   Serial.println("  Start2 ");
+   Serial.println(seg2_start);
+   Serial.println("  End2 ");
+   Serial.println(seg2_end);
+   Serial.println("Start3 ");
+   Serial.println(seg3_start);
+   Serial.println("  End3 ");
+   Serial.println(seg3_end);
+   Serial.println("  Activation RPM ");
+   Serial.println(activation_rpm);
+   Serial.println("  SHIFT RPM ");
+   Serial.println(shift_rpm);
+  }
 
-if(DEBUG){
- Serial.println("PIXELANIM   ");
- Serial.println(pixelanim);
- Serial.println("  Start1 ");
- Serial.println(seg1_start);
- Serial.println("  End1 ");
- Serial.println(seg1_end);
- Serial.println("  Start2 ");
- Serial.println(seg2_start);
- Serial.println("  End2 ");
- Serial.println(seg2_end);
- Serial.println("Start3 ");
- Serial.println(seg3_start);
- Serial.println("  End3 ");
- Serial.println(seg3_end);
- Serial.println("  Activation RPM ");
- Serial.println(activation_rpm);
- Serial.println("  SHIFT RPM ");
- Serial.println(shift_rpm);
-}
-
-  switch(pixelanim){
+  switch (pixelanim)
+  {
 
     case 1:        
       y=0;
@@ -530,20 +606,16 @@ if(DEBUG){
       break;
   }
 
-if(DEBUG){
-  for (i = 0; i<NUMPIXELS; i++){
-    Serial.print(rpmtable[i][0]);
-    Serial.print("  ");
-    Serial.print(rpmtable[i][1]);
-    Serial.print("  ");
-    Serial.println(rpmtable[i][2]);  
+  if(DEBUG){
+    for (i = 0; i<NUMPIXELS; i++){
+      Serial.print(rpmtable[i][0]);
+      Serial.print("  ");
+      Serial.print(rpmtable[i][1]);
+      Serial.print("  ");
+      Serial.println(rpmtable[i][2]);  
+    }
   }
 }
-}
-
-
-
-
 
 
 
@@ -552,10 +624,13 @@ if(DEBUG){
  *************************/
 
 // MENU SYSTEM 
-void menu(){ 
-
-//this keeps us in the menu 
-while (menuvar == 1){   
+void menu()
+{ 
+  tm1637.point(POINT_OFF);
+  //giveTone();
+  //this keeps us in the menu 
+  while (menuvar == 1)
+  {   
   
   // This little bit calls the rotary encoder   
   int result = rotary_process(); 
@@ -563,56 +638,70 @@ while (menuvar == 1){
   if (result == -128){rotaryval--;}   
   else if (result == 64){rotaryval++;} 
  
-  rotaryval = constrain(rotaryval, 0, 17); 
+  rotaryval = constrain(rotaryval, 0, 18); 
 
-//Poll the rotary encoder button to enter menu items
-     if (digitalRead(button_pin) == LOW){ 
-        delay(250); 
-        menu_enter = 1; 
-      } 
+  //Poll the rotary encoder button to enter menu items
+  if (digitalRead(BUTTON_PIN) == LOW){ 
+    delay(250); 
+    menu_enter = 1; 
+  } 
     
   switch (rotaryval){ 
   
     case 0: //Menu Screen. Exiting saves variables to EEPROM 
-      matrix.writeDigitRaw(0,0x39); //e 
-      matrix.writeDigitRaw(1,0x9); //x 
-      matrix.writeDigitRaw(3,0x9); //i 
-      matrix.writeDigitRaw(4,0xF); //t 
+      RPMDisp[0] = 14;//d
+      RPMDisp[1] = 19;//i
+      RPMDisp[2] = 5; //s
+      RPMDisp[3] = 26;//p
       
-      //Poll the Button to exit 
-      if (menu_enter == 1){ 
-        delay(250); 
-        rotaryval = 0; 
-        menuvar=0;
-        menu_enter = 0;  
+      while (menu_enter == 1){ 
         
-        writeEEPROM(); 
-        getEEPROM(); 
-        buildarrays();
-        
-        //Ascend strip 
-        for (int i=0; i<(NUMPIXELS/2)+1; i++){ 
-        strip.setPixelColor(i, strip.Color(0, 0, 25)); 
-        strip.setPixelColor(NUMPIXELS-i, strip.Color(0, 0, 25)); 
-        strip.show(); 
-        delay(35); 
-        } 
-        // Descend Strip 
-        for (int i=0; i<(NUMPIXELS/2)+1; i++){ 
-        strip.setPixelColor(i, strip.Color(0, 0, 0)); 
-        strip.setPixelColor(NUMPIXELS-i, strip.Color(0, 0, 0)); 
-        strip.show(); 
-        delay(35); 
-        }   
-      }     
+        int coloradjust1 = rotary_process();         
+        if (coloradjust1 == -128){display_mode--;}           
+        if (coloradjust1 == 64){display_mode++;}                   
+        display_mode = constrain(display_mode, 1, 2); 
+
+
+        switch (display_mode){
+          case 1:
+              RPMDisp[0] = 39;//
+              RPMDisp[1] = 28;//r
+              RPMDisp[2] = 26;//p
+              RPMDisp[3] = 23;//m
+          break;
+
+          case 2:
+              RPMDisp[0] = 25;//o
+              RPMDisp[1] = 19;//i
+              RPMDisp[2] = 22;//l
+              RPMDisp[3] = 26;//p
+          break;   
+        }
+
+        tm1637.display(RPMDisp);         
+             
+          if (digitalRead(BUTTON_PIN) == LOW){ 
+            delay(250); 
+            menu_enter = 0; 
+            clearStrip(); 
+            strip.show(); 
+            for(int i=0; i<NUMPIXELS+1; i++) { 
+              strip.setPixelColor(i, strip.Color(50, 50, 50)); 
+              strip.show(); 
+              delay(15); 
+              strip.setPixelColor(i, strip.Color(0, 0, 0)); 
+              strip.show(); 
+            }             
+          } 
+        }      
     break; 
     
     
     case 1: //Adjust the global brightness 
-      matrix.writeDigitRaw(0,0x0); // 
-      matrix.writeDigitRaw(1,0x7C); //b 
-      matrix.writeDigitRaw(3,0x50); //r 
-      matrix.writeDigitRaw(4,0x78); //t 
+      RPMDisp[0] = 39;//
+      RPMDisp[1] = 11;//b
+      RPMDisp[2] = 28;//r
+      RPMDisp[3] = 29;//t
             
       while (menu_enter == 1){ 
       
@@ -628,7 +717,7 @@ while (menuvar == 1){
         sb--; 
         testbright = false;
       } 
-      brightval = constrain (brightval, 0, 15); 
+      brightval = constrain(brightval, 0, 15); 
       sb = constrain(sb, 1, 15); 
       
       color1 = load_color(c1); 
@@ -637,17 +726,17 @@ while (menuvar == 1){
       flclr1 = load_color(c4); 
       flclr2 = load_color(c5); 
       
-      matrix.setBrightness(brightval); 
-      matrix.println(brightval); 
-      matrix.writeDisplay(); 
+      tm1637.set(brightval/2); //tm1637 brightness scale 0-7
+      processNumber(brightval);
+      tm1637.display(RPMDisp); 
 
       if (testbright == false){
-      testlights(4);
-      testbright = true;
+        testlights(4);
+        testbright = true;
       }
 
 
-     if (digitalRead(button_pin) == LOW){ 
+     if (digitalRead(BUTTON_PIN) == LOW){ 
         delay(250); 
         menu_enter = 0; 
         clearStrip(); 
@@ -666,11 +755,10 @@ while (menuvar == 1){
    
     
     case 3: // ACTIVATION RPM 
-      matrix.writeDigitRaw(0,0x0); // 
-      matrix.writeDigitRaw(1,0x77); //A 
-      matrix.writeDigitRaw(3,0x39); //C 
-      matrix.writeDigitRaw(4,0x78); //t 
-      
+      RPMDisp[0] = 39;//
+      RPMDisp[1] = 10;//a
+      RPMDisp[2] = 13;//c
+      RPMDisp[3] = 29;//t
 
       while (menu_enter == 1){      
         int coloradjust1 = rotary_process(); 
@@ -679,18 +767,18 @@ while (menuvar == 1){
         if (coloradjust1 == 64){activation_rpm=activation_rpm+10;}         
         activation_rpm = constrain(activation_rpm, 0, 20000); 
         
-      if (activation_rpm<9999){        
-        matrix.println(activation_rpm); 
-        strip.setPixelColor(0, strip.Color(0, 0, 0));
+      if (activation_rpm<9999){
+          processNumber(activation_rpm);
+          strip.setPixelColor(0, strip.Color(0, 0, 0));
         } else {
-        matrix.println(activation_rpm-10000);
-        strip.setPixelColor(0, strip.Color(50, 50, 100));
-       // matrix.writeDigitRaw(2, 0x80);  
+          processNumber(activation_rpm-10000);
+          strip.setPixelColor(0, strip.Color(50, 50, 100));
         }
-        matrix.writeDisplay();         
+        //matrix.writeDisplay();
+        tm1637.display(RPMDisp);      
         strip.show();
         
-        if (digitalRead(button_pin) == LOW){ 
+        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           menu_enter = 0; 
           clearStrip(); 
@@ -708,10 +796,10 @@ while (menuvar == 1){
     
     
     case 4: // SHIFT RPM 
-      matrix.writeDigitRaw(0,0x6D); //S 
-      matrix.writeDigitRaw(1,0x76); //H 
-      matrix.writeDigitRaw(3,0x71); //F 
-      matrix.writeDigitRaw(4,0x78); //t       
+      RPMDisp[0] = 5;//s
+      RPMDisp[1] = 18;//h
+      RPMDisp[2] = 16;//f
+      RPMDisp[3] = 29;//t   
           
       while (menu_enter == 1){ 
               
@@ -722,17 +810,16 @@ while (menuvar == 1){
         shift_rpm = constrain(shift_rpm, 0, 20000); 
 
         if (shift_rpm<9999){        
-        matrix.println(shift_rpm); 
-        strip.setPixelColor(0, strip.Color(0, 0, 0));
+          processNumber(shift_rpm);
+          strip.setPixelColor(0, strip.Color(0, 0, 0));
         } else {
-        matrix.println(shift_rpm-10000);
-        strip.setPixelColor(0, strip.Color(50, 50, 100));
-       // matrix.writeDigitRaw(2, 0x80);  
+          processNumber(shift_rpm-10000);
+          strip.setPixelColor(0, strip.Color(50, 50, 100));
         }
-        matrix.writeDisplay();         
+        tm1637.display(RPMDisp);       
         strip.show(); 
         
-        if (digitalRead(button_pin) == LOW){ 
+        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           menu_enter = 0; 
           clearStrip(); 
@@ -753,10 +840,10 @@ while (menuvar == 1){
 
      case 5:  //RPM SENSE MODE
     //senseoption
-     matrix.writeDigitRaw(0,0x6D); //S
-     matrix.writeDigitRaw(1,0x79); //E
-     matrix.writeDigitRaw(3,0x54); //n
-     matrix.writeDigitRaw(4,0x6D); //S
+      RPMDisp[0] = 5; //s
+      RPMDisp[1] = 15;//e
+      RPMDisp[2] = 24;//n
+      RPMDisp[3] = 5; //s
       
       while (menu_enter == 1){         
         int coloradjust1 = rotary_process();         
@@ -766,23 +853,23 @@ while (menuvar == 1){
 
         switch (senseoption){
           case 1:
-              matrix.writeDigitRaw(0,0x30); //I
-              matrix.writeDigitRaw(1,0x54); //n
-              matrix.writeDigitRaw(3,0x78); //t
-              matrix.writeDigitRaw(4,0x50); //r
+              RPMDisp[0] = 19; //i
+              RPMDisp[1] = 24;//n
+              RPMDisp[2] = 29;//t
+              RPMDisp[3] = 28; //r
           break;
 
           case 2:
-              matrix.writeDigitRaw(0,0x00); //
-              matrix.writeDigitRaw(1,0x00); //
-              matrix.writeDigitRaw(3,0x71); //F
-              matrix.writeDigitRaw(4,0x50); //r
+              RPMDisp[0] = 39; //
+              RPMDisp[1] = 39;//
+              RPMDisp[2] = 16;//f
+              RPMDisp[3] = 28; //r
           break;   
         }
 
-        matrix.writeDisplay();         
+        tm1637.display(RPMDisp);       
            
-        if (digitalRead(button_pin) == LOW){ 
+        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           menu_enter = 0; 
           clearStrip(); 
@@ -795,11 +882,11 @@ while (menuvar == 1){
             strip.show(); 
           }
 
-       matrix.writeDigitRaw(0,0x7C); //b
-       matrix.writeDigitRaw(1,0x5C); //o 
-       matrix.writeDigitRaw(3,0x5C); //o
-       matrix.writeDigitRaw(4,0x78); //t 
-       matrix.writeDisplay();
+       RPMDisp[0] = 11; //b
+       RPMDisp[1] = 25; //o
+       RPMDisp[2] = 25; //o
+       RPMDisp[3] = 29; //t
+       tm1637.display(RPMDisp);
        delay(1000);
        writeEEPROM(); 
        resetFunc();
@@ -809,10 +896,10 @@ while (menuvar == 1){
 
 
      case 6:  //SMOOTHING (conditioning)
-     matrix.writeDigitRaw(0,0x39); //c
-     matrix.writeDigitRaw(1,0x5C); //o'
-     matrix.writeDigitRaw(3,0x54); //n'
-     matrix.writeDigitRaw(4,0x5E); //d
+      RPMDisp[0] = 12; //c
+      RPMDisp[1] = 25; //o
+      RPMDisp[2] = 24; //n
+      RPMDisp[3] = 14; //d
       
       while (menu_enter == 1){ 
         
@@ -823,20 +910,20 @@ while (menuvar == 1){
 
 
       if (smoothing){
-              matrix.writeDigitRaw(0,0x0); //
-               matrix.writeDigitRaw(1,0x0); // 
-               matrix.writeDigitRaw(3,0x3F); // O
-               matrix.writeDigitRaw(4,0x54); //n 
+              RPMDisp[0] = 39; //
+              RPMDisp[1] = 39; //
+              RPMDisp[2] = 25; //o
+              RPMDisp[3] = 24; //n
         
       }else{
-              matrix.writeDigitRaw(0,0x0); //
-               matrix.writeDigitRaw(1,0x3F); //O
-               matrix.writeDigitRaw(3,0x71); //F
-               matrix.writeDigitRaw(4,0x71); //F 
+              RPMDisp[0] = 39; //
+              RPMDisp[1] = 25; //o
+              RPMDisp[2] = 16; //f
+              RPMDisp[3] = 16; //f
        }
-        matrix.writeDisplay();         
+        tm1637.display(RPMDisp);         
            
-        if (digitalRead(button_pin) == LOW){ 
+        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           menu_enter = 0; 
           clearStrip(); 
@@ -854,10 +941,10 @@ while (menuvar == 1){
 
 
  case 7:  // PULSES PER REVOLUTION
-      matrix.writeDigitRaw(0,0x00); //
-     matrix.writeDigitRaw(1,0x73); //P
-     matrix.writeDigitRaw(3,0x73); //P
-     matrix.writeDigitRaw(4,0x50); //r 
+      RPMDisp[0] = 39; //
+      RPMDisp[1] = 26; //p
+      RPMDisp[2] = 26; //p
+      RPMDisp[3] = 28; //r
       
       while (menu_enter == 1){ 
         
@@ -867,9 +954,11 @@ while (menuvar == 1){
         cal = constrain(cal, 1, 36); 
         
         if (prev_cal != cal){
-          matrix.println(cal);
-          matrix.setBrightness(brightval/3); 
-          matrix.writeDisplay();   
+          //matrix.println(cal);
+          //matrix.setBrightness(brightval/3); 
+          //matrix.writeDisplay();
+          processNumber(cal);
+          tm1637.display(RPMDisp);
           prev_cal = cal;
           delay(500);     
         }
@@ -887,13 +976,10 @@ while (menuvar == 1){
           break;  
         }
         
-
-        if (rpm > 9999){ matrix.println(rpm/10);
-        }else{matrix.println(rpm); }
-        matrix.setBrightness(brightval);
-        matrix.writeDisplay();         
+        processNumber(rpm);
+        tm1637.display(RPMDisp);        
    
-       if (digitalRead(button_pin) == LOW){ 
+       if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           menu_enter = 0; 
           clearStrip(); 
@@ -910,16 +996,11 @@ while (menuvar == 1){
      break;
 
 
-
-
-
-
-
      case 8:  // NUMBER OF LEDS
-      matrix.writeDigitRaw(0,0x54); //n
-     matrix.writeDigitRaw(1,0x38); //L
-     matrix.writeDigitRaw(3,0x79); //E
-     matrix.writeDigitRaw(4,0x5E); //D 
+      RPMDisp[0] = 24; //n
+      RPMDisp[1] = 22; //l
+      RPMDisp[2] = 15; //e
+      RPMDisp[3] = 14; //d
       
       while (menu_enter == 1){ 
         
@@ -928,10 +1009,10 @@ while (menuvar == 1){
         if (coloradjust1 == 64){NUMPIXELS++;}                   
         NUMPIXELS = constrain(NUMPIXELS, 0, 32); 
 
-        matrix.println(NUMPIXELS); 
-        matrix.writeDisplay();         
+        processNumber(NUMPIXELS);
+        tm1637.display(RPMDisp); 
    
-       if (digitalRead(button_pin) == LOW){ 
+       if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           menu_enter = 0; 
           clearStrip(); 
@@ -944,11 +1025,11 @@ while (menuvar == 1){
             strip.show(); 
           }
 
-       matrix.writeDigitRaw(0,0x7C); //b
-       matrix.writeDigitRaw(1,0x5C); //o 
-       matrix.writeDigitRaw(3,0x5C); //o
-       matrix.writeDigitRaw(4,0x78); //t 
-       matrix.writeDisplay();
+       RPMDisp[0] = 11; //b
+       RPMDisp[1] = 25; //o
+       RPMDisp[2] = 25; //o
+       RPMDisp[3] = 29; //t
+       tm1637.display(RPMDisp);
        delay(1000);
        writeEEPROM(); 
        resetFunc();
@@ -957,11 +1038,11 @@ while (menuvar == 1){
      break;    
     
  
-     case 9:  // Color Segmentation                    
-     matrix.writeDigitRaw(0,0x00); //
-     matrix.writeDigitRaw(1,0x6D); //S 
-     matrix.writeDigitRaw(3,0x79); //E
-     matrix.writeDigitRaw(4,0x3D); //G 
+     case 9:  // Color Segmentation
+      RPMDisp[0] = 39;//
+      RPMDisp[1] = 5; //s
+      RPMDisp[2] = 15;//e
+      RPMDisp[3] = 17;//g
       
       if (menu_enter == 1){
           build_segments();
@@ -985,18 +1066,20 @@ break;
 
      case 10:  // PIXEL ANIMATION MODE
 
-matrix.writeDigitRaw(0,0x77); //A 
-matrix.writeDigitRaw(1,0x54); //n
-matrix.writeDigitRaw(3,0x10); //i 
-matrix.writeDigitRaw(4,0x15); //m
+      RPMDisp[0] = 10; //a
+      RPMDisp[1] = 24; //n
+      RPMDisp[2] = 19; //i
+      RPMDisp[3] = 23; //m
     
       while (menu_enter == 1){        
         int coloradjust1 = rotary_process();         
         if (coloradjust1 == -128){pixelanim--;} 
         if (coloradjust1 == 64){pixelanim++;}         
         pixelanim = constrain(pixelanim, 1, 3);        
-        matrix.println(pixelanim); 
-        matrix.writeDisplay(); 
+        //matrix.println(pixelanim); 
+        //matrix.writeDisplay(); 
+        processNumber(pixelanim);
+        tm1637.display(RPMDisp); 
                 
           if (prev_animation != pixelanim){
            if(DEBUG){ Serial.println("Animation Change");}
@@ -1027,37 +1110,37 @@ matrix.writeDigitRaw(4,0x15); //m
           }
 
         
-        if (digitalRead(button_pin) == LOW){           
-          delay(250);
-          menu_enter = 0;
-          clearStrip(); 
-          strip.show(); 
-       matrix.writeDigitRaw(0,0x50); //r
-       matrix.writeDigitRaw(1,0x79); //E 
-       matrix.writeDigitRaw(3,0x5E); //d
-       matrix.writeDigitRaw(4,0x5C); //o 
-       matrix.writeDisplay();
-       delay(1000);
-       matrix.writeDigitRaw(0,0x00); //
-       matrix.writeDigitRaw(1,0x6D); //S 
-       matrix.writeDigitRaw(3,0x79); //E
-       matrix.writeDigitRaw(4,0x3D); //G 
-       matrix.writeDisplay();
-       delay(1000);
-       matrix.writeDigitRaw(0,0x00); //
-       matrix.writeDigitRaw(1,0x00); //
-       matrix.writeDigitRaw(3,0x00); //
-       matrix.writeDigitRaw(4,0x00); //
-       matrix.writeDisplay();
-       delay(500);
-       build_segments();
-          for(int i=0; i<NUMPIXELS+1; i++) { 
-            strip.setPixelColor(i, color1); 
-            strip.show(); 
-            delay(15); 
-            strip.setPixelColor(i, strip.Color(0, 0, 0)); 
-            strip.show(); 
-          }
+        if (digitalRead(BUTTON_PIN) == LOW){           
+           delay(250);
+           menu_enter = 0;
+           clearStrip(); 
+           strip.show(); 
+           RPMDisp[0] = 28; //r
+           RPMDisp[1] = 15; //e
+           RPMDisp[2] = 14; //d
+           RPMDisp[3] = 25; //o
+           tm1637.display(RPMDisp);
+           delay(1000);
+           RPMDisp[0] = 39; //
+           RPMDisp[1] = 5; //s
+           RPMDisp[2] = 15; //e
+           RPMDisp[3] = 17; //g
+           tm1637.display(RPMDisp);
+           delay(1000);
+           RPMDisp[0] = 39; //
+           RPMDisp[1] = 39; //
+           RPMDisp[2] = 39; //
+           RPMDisp[3] = 39; //
+           tm1637.display(RPMDisp);
+           delay(500);
+           build_segments();
+           for(int i=0; i<NUMPIXELS+1; i++) { 
+             strip.setPixelColor(i, color1); 
+             strip.show(); 
+             delay(15); 
+             strip.setPixelColor(i, strip.Color(0, 0, 0)); 
+             strip.show(); 
+           }
      }        
     } 
    break;  
@@ -1065,10 +1148,10 @@ matrix.writeDigitRaw(4,0x15); //m
         
     
     case 11: //Adjust Color #1     
-      matrix.writeDigitRaw(0,0x39); //C 
-      matrix.writeDigitRaw(1,0x38); //L 
-      matrix.writeDigitRaw(3,0x33); //R 
-      matrix.writeDigitRaw(4,0x6); //1 
+      RPMDisp[0] = 12; //c
+      RPMDisp[1] = 22; //l
+      RPMDisp[2] = 28; //r
+      RPMDisp[3] = 1;  //1
       
      while (menu_enter == 1){ 
         
@@ -1083,7 +1166,7 @@ matrix.writeDigitRaw(4,0x15); //m
           testlights(1);
         }
       
-        if (digitalRead(button_pin) == LOW){ 
+        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           prev_color = 0;
           menu_enter = 0; 
@@ -1103,10 +1186,10 @@ matrix.writeDigitRaw(4,0x15); //m
     
     
     case 12: //Adjust Color #2 
-      matrix.writeDigitRaw(0,0x39); //C 
-      matrix.writeDigitRaw(1,0x38); //L 
-      matrix.writeDigitRaw(3,0x33); //R 
-      matrix.writeDigitRaw(4,0x5B); //2 
+      RPMDisp[0] = 12; //c
+      RPMDisp[1] = 22; //l
+      RPMDisp[2] = 28; //r
+      RPMDisp[3] = 2;  //2
            
       while (menu_enter == 1){ 
       
@@ -1123,7 +1206,7 @@ matrix.writeDigitRaw(4,0x15); //m
         }
         
         
-        if (digitalRead(button_pin) == LOW){ 
+        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           prev_color = 0;
           menu_enter = 0; 
@@ -1141,10 +1224,10 @@ matrix.writeDigitRaw(4,0x15); //m
     break; 
     
     case 13: //Adjust Color #3 
-      matrix.writeDigitRaw(0,0x39); //C 
-      matrix.writeDigitRaw(1,0x38); //L 
-      matrix.writeDigitRaw(3,0x33); //R 
-      matrix.writeDigitRaw(4,0x4F); //3 
+      RPMDisp[0] = 12; //c
+      RPMDisp[1] = 22; //l
+      RPMDisp[2] = 28; //r
+      RPMDisp[3] = 3;  //3
             
       while (menu_enter == 1){       
         int coloradjust1 = rotary_process();         
@@ -1159,7 +1242,7 @@ matrix.writeDigitRaw(4,0x15); //m
         }
         
         
-        if (digitalRead(button_pin) == LOW){ 
+        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           prev_color = 0;
           menu_enter = 0; 
@@ -1177,10 +1260,11 @@ matrix.writeDigitRaw(4,0x15); //m
     break; 
     
     case 14: //Adjust Color #4 
-      matrix.writeDigitRaw(0,0x6D); //S 
-      matrix.writeDigitRaw(1,0x39); //C 
-      matrix.writeDigitRaw(3,0x0); // 
-      matrix.writeDigitRaw(4,0x6); //1 
+      RPMDisp[0] = 5; //s
+      RPMDisp[1] = 12; //c
+      RPMDisp[2] = 39; //
+      RPMDisp[3] = 1;  //1
+      
             
       while (menu_enter == 1){       
         int coloradjust1 = rotary_process();         
@@ -1197,7 +1281,7 @@ matrix.writeDigitRaw(4,0x15); //m
         
         strip.show(); 
                
-        if (digitalRead(button_pin) == LOW){ 
+        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           menu_enter = 0; 
           clearStrip(); 
@@ -1214,10 +1298,10 @@ matrix.writeDigitRaw(4,0x15); //m
     break; 
     
     case 15: //Adjust Color #5 
-      matrix.writeDigitRaw(0,0x6D); //S 
-      matrix.writeDigitRaw(1,0x39); //C 
-      matrix.writeDigitRaw(3,0x0); // 
-      matrix.writeDigitRaw(4,0x5B); //2 
+      RPMDisp[0] = 5; //s
+      RPMDisp[1] = 12; //c
+      RPMDisp[2] = 39; //
+      RPMDisp[3] = 2;  //2
       
       while (menu_enter == 1){       
         int coloradjust1 = rotary_process();        
@@ -1233,7 +1317,7 @@ matrix.writeDigitRaw(4,0x15); //m
         
         strip.show(); 
                 
-        if (digitalRead(button_pin) == LOW){ 
+        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           menu_enter = 0; 
           clearStrip(); 
@@ -1254,10 +1338,10 @@ matrix.writeDigitRaw(4,0x15); //m
 
     
     case 16:   //DEBUG MODE
-      matrix.writeDigitRaw(0,0x5E); //d 
-      matrix.writeDigitRaw(1,0x79); //E 
-      matrix.writeDigitRaw(3,0x7C); //b
-      matrix.writeDigitRaw(4,0x6F); //g 
+      RPMDisp[0] = 14; //d
+      RPMDisp[1] = 15; //e
+      RPMDisp[2] = 11; //b
+      RPMDisp[3] = 17;  //g
       
  while (menu_enter == 1){       
         int coloradjust1 = rotary_process();        
@@ -1266,22 +1350,21 @@ matrix.writeDigitRaw(4,0x15); //m
         DEBUG = constrain(DEBUG, 0, 1); 
          
       if (DEBUG== 1){
-               matrix.writeDigitRaw(0,0x0); //
-               matrix.writeDigitRaw(1,0x0); // 
-               matrix.writeDigitRaw(3,0x3F); // O
-               matrix.writeDigitRaw(4,0x54); //n 
+               RPMDisp[0] = 39; //
+               RPMDisp[1] = 39; //
+               RPMDisp[2] = 25; //o
+               RPMDisp[3] = 24;  //n
         
       }else{
-              matrix.writeDigitRaw(0,0x0); //
-               matrix.writeDigitRaw(1,0x3F); //O
-               matrix.writeDigitRaw(3,0x71); //F
-               matrix.writeDigitRaw(4,0x71); //F 
-        
+               RPMDisp[0] = 39; //
+               RPMDisp[1] = 25; //o
+               RPMDisp[2] = 16; //f
+               RPMDisp[3] = 16;  //f
       }
 
-    matrix.writeDisplay(); 
+    tm1637.display(RPMDisp);
                  
-        if (digitalRead(button_pin) == LOW){ 
+        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           menu_enter = 0; 
           clearStrip(); 
@@ -1299,11 +1382,10 @@ matrix.writeDigitRaw(4,0x15); //m
 
 
     case 17:   //RESET
-      matrix.writeDigitRaw(0,0x00); //
-      matrix.writeDigitRaw(1,0x50); //r
-      matrix.writeDigitRaw(3,0x6D); //S
-      matrix.writeDigitRaw(4,0x78); //t
-
+       RPMDisp[0] = 39; //
+       RPMDisp[1] = 28; //r
+       RPMDisp[2] = 5; //s
+       RPMDisp[3] = 29;  //t
       
  while (menu_enter == 1){       
         int coloradjust1 = rotary_process();        
@@ -1312,23 +1394,22 @@ matrix.writeDigitRaw(4,0x15); //m
         rst = constrain(rst, 0, 1); 
         
       if (rst == 1){
-              matrix.writeDigitRaw(0,0x0); //
-              matrix.writeDigitRaw(1,0x6E); // Y
-              matrix.writeDigitRaw(3,0x79); // E
-              matrix.writeDigitRaw(4,0x6D); //S
+               RPMDisp[0] = 39; //
+               RPMDisp[1] = 32; //y
+               RPMDisp[2] = 15; //e
+               RPMDisp[3] = 5; //s
         
       }else{
-               matrix.writeDigitRaw(0,0x0); //
-               matrix.writeDigitRaw(1,0x0); //
-               matrix.writeDigitRaw(3,0x54); //n
-               matrix.writeDigitRaw(4,0x5C); //O 
-        
+               RPMDisp[0] = 39; //
+               RPMDisp[1] = 39; //
+               RPMDisp[2] = 24; //n
+               RPMDisp[3] = 25; //o
       }
 
-    matrix.writeDisplay(); 
+     tm1637.display(RPMDisp);
  
                 
-        if (digitalRead(button_pin) == LOW){ 
+        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           menu_enter = 0; 
           clearStrip(); 
@@ -1342,17 +1423,17 @@ matrix.writeDigitRaw(4,0x15); //m
           }
                    if (rst ==1){
 
-               matrix.writeDigitRaw(0,0x0); //
-               matrix.writeDigitRaw(1,0x7C); // b
-               matrix.writeDigitRaw(3,0x6E); // Y
-               matrix.writeDigitRaw(4,0x79); //E
-               matrix.writeDisplay(); 
+               //matrix.writeDigitRaw(0,0x0); //
+               //matrix.writeDigitRaw(1,0x7C); // b
+               //matrix.writeDigitRaw(3,0x6E); // Y
+               //matrix.writeDigitRaw(4,0x79); //E
+               //matrix.writeDisplay(); 
                delay(500);
-               matrix.writeDigitRaw(0,0x5E); // d
-               matrix.writeDigitRaw(1,0x77); // a
-               matrix.writeDigitRaw(3,0x78); // t
-               matrix.writeDigitRaw(4,0x77); //a
-               matrix.writeDisplay(); 
+               //matrix.writeDigitRaw(0,0x5E); // d
+               //matrix.writeDigitRaw(1,0x77); // a
+               //matrix.writeDigitRaw(3,0x78); // t
+               //matrix.writeDigitRaw(4,0x77); //a
+               //matrix.writeDisplay(); 
                delay(500);
 
                for (int i = 0; i < 512; i++){EEPROM.write(i, 0);}
@@ -1361,109 +1442,194 @@ matrix.writeDigitRaw(4,0x15); //m
             }       
         } 
       }  
+      break;
+
+
+      case 18: //Menu Screen. Exiting saves variables to EEPROM 
+      RPMDisp[0] = 15;//e
+      RPMDisp[1] = 18;//x
+      RPMDisp[2] = 19;//i
+      RPMDisp[3] = 29;//t
+      
+      //Poll the Button to exit 
+      if (menu_enter == 1){
+        //tm1637.clearDisplay();
+        delay(250); 
+        rotaryval = 0; 
+        menuvar=0;
+        menu_enter = 0;  
+        
+        writeEEPROM(); 
+        getEEPROM(); 
+        buildarrays();
+        
+        //Ascend strip 
+        for (int i=0; i<(NUMPIXELS/2)+1; i++){ 
+        strip.setPixelColor(i, strip.Color(0, 0, 25)); 
+        strip.setPixelColor(NUMPIXELS-i, strip.Color(0, 0, 25)); 
+        strip.show(); 
+        delay(35); 
+        } 
+        // Descend Strip 
+        for (int i=0; i<(NUMPIXELS/2)+1; i++){ 
+        strip.setPixelColor(i, strip.Color(0, 0, 0)); 
+        strip.setPixelColor(NUMPIXELS-i, strip.Color(0, 0, 0)); 
+        strip.show(); 
+        delay(35); 
+        }   
+      }     
     break;
           
     } 
-   matrix.writeDisplay();  
+    tm1637.display(RPMDisp); 
   } 
-} 
-
-
-
-
+} //****** end MENU **********
 
 
 /*************************
  * SUBROUTINES
  *************************/
+void processNumber(long n)
+{
+  if (n > 9999) {
+    n = n/10;
+  }
+  if (n > 999) {
+    //int n = rpm;
+    RPMDisp[0] = n / 1000;
+    n -= RPMDisp[0] * 1000;
+    RPMDisp[1] = n / 100;
+    n -= RPMDisp[1] * 100;
+    RPMDisp[2] = n / 10;
+    n -= RPMDisp[2] * 10;
+    RPMDisp[3] = n;
+  } else if (n > 99) {
+    RPMDisp[0] = 39;
+    RPMDisp[1] = n / 100;
+    n -= RPMDisp[1] * 100;
+    RPMDisp[2] = n / 10;
+    n -= RPMDisp[2] * 10;
+    RPMDisp[3] = n;
+  } else if (n > 9) {
+    RPMDisp[0] = 39;
+    RPMDisp[1] = 39;
+    RPMDisp[2] = n / 10;
+    n -= RPMDisp[2] * 10;
+    RPMDisp[3] = n;
+  } else {
+    RPMDisp[0] = 39;
+    RPMDisp[1] = 39;
+    RPMDisp[2] = 39;
+    RPMDisp[3] = n;
+  }
+}
+void processNumberBar(int n)
+{
+  if (n > 9) {
+    RPMDisp[0] = 39;
+    RPMDisp[1] = n / 10;
+    n -= RPMDisp[1] * 10;
+    RPMDisp[2] = n;
+    RPMDisp[3] = 11;
+  } else {
+    RPMDisp[0] = 39;
+    RPMDisp[1] = 0;
+    RPMDisp[2] = n;
+    RPMDisp[3] = 11;
+  }
+}
 
+void giveTone()
+{
+  tone(SND_PIN, 440);
+  delay(100);
+  noTone(SND_PIN);
+}
 
 //This subroutine reads the stored variables from memory 
-void getEEPROM(){ 
-brightval = EEPROM.read(0); 
-sb = EEPROM.read(1); 
-c1 = EEPROM.read(2); 
-c2 = EEPROM.read(3); 
-c3 = EEPROM.read(4); 
-c4 = EEPROM.read(5); 
-c5 = EEPROM.read(6); 
-activation_rpm = EEPROM.read(7); 
-pixelanim  = EEPROM.read(8); 
-senseoption  = EEPROM.read(9); 
-smoothing = EEPROM.read(10); 
-NUMPIXELS = EEPROM.read(11); 
-rpmscaler = EEPROM.read(12); 
-shift_rpm1 = EEPROM.read(13); 
-shift_rpm2 = EEPROM.read(14); 
-shift_rpm3 = EEPROM.read(15); 
-shift_rpm4 = EEPROM.read(16); 
-DEBUG = EEPROM.read(17); 
-seg1_start = EEPROM.read(18); 
-seg1_end = EEPROM.read(19); 
-seg2_start = EEPROM.read(20); 
-seg2_end = EEPROM.read(21); 
-seg3_start = EEPROM.read(22); 
-seg3_end = EEPROM.read(23); 
-activation_rpm1 = EEPROM.read(24); 
-activation_rpm2 = EEPROM.read(25); 
-activation_rpm3 = EEPROM.read(26); 
-activation_rpm4 = EEPROM.read(27); 
-cal = EEPROM.read(28); 
-
-activation_rpm = ((activation_rpm1 << 0) & 0xFF) + ((activation_rpm2 << 8) & 0xFFFF) + ((activation_rpm3 << 16) & 0xFFFFFF) + ((activation_rpm4 << 24) & 0xFFFFFFFF);
-shift_rpm = ((shift_rpm1 << 0) & 0xFF) + ((shift_rpm2 << 8) & 0xFFFF) + ((shift_rpm3 << 16) & 0xFFFFFF) + ((shift_rpm4 << 24) & 0xFFFFFFFF);
-
-buildarrays();
-
-//seg1_start = 3;
-//seg2_start = 5; 
-//seg3_start = 9;
-
+void getEEPROM()
+{ 
+  brightval = EEPROM.read(0); 
+  sb = EEPROM.read(1); 
+  c1 = EEPROM.read(2); 
+  c2 = EEPROM.read(3); 
+  c3 = EEPROM.read(4); 
+  c4 = EEPROM.read(5); 
+  c5 = EEPROM.read(6); 
+  activation_rpm = EEPROM.read(7); 
+  pixelanim  = EEPROM.read(8); 
+  senseoption  = EEPROM.read(9); 
+  smoothing = EEPROM.read(10); 
+  NUMPIXELS = EEPROM.read(11); 
+  rpmscaler = EEPROM.read(12); 
+  shift_rpm1 = EEPROM.read(13); 
+  shift_rpm2 = EEPROM.read(14); 
+  shift_rpm3 = EEPROM.read(15); 
+  shift_rpm4 = EEPROM.read(16); 
+  DEBUG = EEPROM.read(17); 
+  seg1_start = EEPROM.read(18); 
+  seg1_end = EEPROM.read(19); 
+  seg2_start = EEPROM.read(20); 
+  seg2_end = EEPROM.read(21); 
+  seg3_start = EEPROM.read(22); 
+  seg3_end = EEPROM.read(23); 
+  activation_rpm1 = EEPROM.read(24); 
+  activation_rpm2 = EEPROM.read(25); 
+  activation_rpm3 = EEPROM.read(26); 
+  activation_rpm4 = EEPROM.read(27); 
+  cal = EEPROM.read(28); 
+  display_mode = EEPROM.read(29); 
+  
+  activation_rpm = ((activation_rpm1 << 0) & 0xFF) + ((activation_rpm2 << 8) & 0xFFFF) + ((activation_rpm3 << 16) & 0xFFFFFF) + ((activation_rpm4 << 24) & 0xFFFFFFFF);
+  shift_rpm = ((shift_rpm1 << 0) & 0xFF) + ((shift_rpm2 << 8) & 0xFFFF) + ((shift_rpm3 << 16) & 0xFFFFFF) + ((shift_rpm4 << 24) & 0xFFFFFFFF);
+  
+  buildarrays();
 } 
 
 
 //This subroutine writes the stored variables to memory 
-void writeEEPROM(){ 
-
-byte four = (shift_rpm & 0xFF);
-byte three = ((shift_rpm >> 8) & 0xFF);
-byte two = ((shift_rpm >> 16) & 0xFF);
-byte one = ((shift_rpm >> 24) & 0xFF);
-
-byte activation_four = (activation_rpm & 0xFF);
-byte activation_three = ((activation_rpm >> 8) & 0xFF);
-byte activation_two = ((activation_rpm >> 16) & 0xFF);
-byte activation_one = ((activation_rpm >> 24) & 0xFF);
-
-EEPROM.write(0, brightval); 
-EEPROM.write(1, sb); 
-EEPROM.write(2, c1); 
-EEPROM.write(3, c2); 
-EEPROM.write(4, c3); 
-EEPROM.write(5, c4); 
-EEPROM.write(6, c5); 
-EEPROM.write(7, activation_rpm); 
-EEPROM.write(8, pixelanim); 
-EEPROM.write(9, senseoption); 
-EEPROM.write(10, smoothing); 
-EEPROM.write(11, NUMPIXELS); 
-EEPROM.write(12, rpmscaler); 
-EEPROM.write(13, four); 
-EEPROM.write(14, three); 
-EEPROM.write(15, two); 
-EEPROM.write(16, one); 
-EEPROM.write(17, DEBUG); 
-EEPROM.write(18, seg1_start); 
-EEPROM.write(19, seg1_end); 
-EEPROM.write(20, seg2_start); 
-EEPROM.write(21, seg2_end); 
-EEPROM.write(22, seg3_start); 
-EEPROM.write(23, seg3_end); 
-EEPROM.write(24, activation_four); 
-EEPROM.write(25, activation_three); 
-EEPROM.write(26, activation_two); 
-EEPROM.write(27, activation_one); 
-EEPROM.write(28, cal);
+void writeEEPROM()
+{ 
+  byte four = (shift_rpm & 0xFF);
+  byte three = ((shift_rpm >> 8) & 0xFF);
+  byte two = ((shift_rpm >> 16) & 0xFF);
+  byte one = ((shift_rpm >> 24) & 0xFF);
+  
+  byte activation_four = (activation_rpm & 0xFF);
+  byte activation_three = ((activation_rpm >> 8) & 0xFF);
+  byte activation_two = ((activation_rpm >> 16) & 0xFF);
+  byte activation_one = ((activation_rpm >> 24) & 0xFF);
+  
+  EEPROM.write(0, brightval); 
+  EEPROM.write(1, sb); 
+  EEPROM.write(2, c1); 
+  EEPROM.write(3, c2); 
+  EEPROM.write(4, c3); 
+  EEPROM.write(5, c4); 
+  EEPROM.write(6, c5); 
+  EEPROM.write(7, activation_rpm); 
+  EEPROM.write(8, pixelanim); 
+  EEPROM.write(9, senseoption); 
+  EEPROM.write(10, smoothing); 
+  EEPROM.write(11, NUMPIXELS); 
+  EEPROM.write(12, rpmscaler); 
+  EEPROM.write(13, four); 
+  EEPROM.write(14, three); 
+  EEPROM.write(15, two); 
+  EEPROM.write(16, one); 
+  EEPROM.write(17, DEBUG); 
+  EEPROM.write(18, seg1_start); 
+  EEPROM.write(19, seg1_end); 
+  EEPROM.write(20, seg2_start); 
+  EEPROM.write(21, seg2_end); 
+  EEPROM.write(22, seg3_start); 
+  EEPROM.write(23, seg3_end); 
+  EEPROM.write(24, activation_four); 
+  EEPROM.write(25, activation_three); 
+  EEPROM.write(26, activation_two); 
+  EEPROM.write(27, activation_one); 
+  EEPROM.write(28, cal);
+  EEPROM.write(29, display_mode);
 } 
 
 
@@ -1471,8 +1637,10 @@ EEPROM.write(28, cal);
 
 
 //This sub clears the strip to all OFF 
-void clearStrip() { 
-  for( int i = 0; i<strip.numPixels(); i++){ 
+void clearStrip()
+{ 
+  for( int i = 0; i<strip.numPixels(); i++)
+  { 
     strip.setPixelColor(i, strip.Color(0, 0, 0)); 
     strip.show(); 
   } 
@@ -1481,46 +1649,53 @@ void clearStrip() {
 
 
 //Helper Color Manager - This translates our 255 value into a meaningful color
-uint32_t load_color(int cx){ 
-unsigned int r,g,b; 
-if (cx == 0){ 
+uint32_t load_color(int cx)
+{ 
+  unsigned int r,g,b; 
+  if (cx == 0)
+  { 
+      r = 0; 
+      g = 0; 
+      b = 0; 
+  } 
+  
+  if (cx>0 && cx<=85)
+  { 
+    r = 255-(cx*3); 
+    g = cx*3; 
+    b=0; 
+  } 
+  
+  if (cx>85 && cx < 170)
+  { 
     r = 0; 
+    g = 255 - ((cx-85)*3); 
+    b = (cx-85)*3; 
+  } 
+  
+  if (cx >= 170 && cx<255)
+  { 
+    r = (cx-170)*3; 
     g = 0; 
-    b = 0; 
-} 
-
-if (cx>0 && cx<=85){ 
-  r = 255-(cx*3); 
-  g = cx*3; 
-  b=0; 
-} 
-
-if (cx>85 && cx < 170){ 
-  r = 0; 
-  g = 255 - ((cx-85)*3); 
-  b = (cx-85)*3; 
-} 
-
-if (cx >= 170 && cx<255){ 
-  r = (cx-170)*3; 
-  g = 0; 
-  b = 255 - ((cx-170)*3); 
-} 
-
-if (cx == 255){ 
-  r=255; 
-  g=255; 
-  b=255; 
-} 
-
-r = (r/sb); 
-g = (g/sb); 
-b = (b/sb); 
-return strip.Color(r,g,b); 
+    b = 255 - ((cx-170)*3); 
+  } 
+  
+  if (cx == 255)
+  { 
+    r=255; 
+    g=255; 
+    b=255; 
+  } 
+  
+  r = (r/sb); 
+  g = (g/sb); 
+  b = (b/sb); 
+  return strip.Color(r,g,b); 
 }
 
 
-void testlights(int color){
+void testlights(int color)
+{
   for (int a = 0; a<NUMPIXELS; a++){    
     if (color <4){
         if (rpmtable[a][1]==color){
@@ -1561,34 +1736,37 @@ void testlights(int color){
 }
 
 
-void check_first_run(){
+void check_first_run()
+{
   if (shift_rpm == 0){
-     Serial.println("FIRST RUN! LOADING DEFAULTS");  
-      brightval = 0; 
-      sb = 15; 
-      c1 = 79; 
-      c2 = 48; 
-      c3 = 1; 
-      c4 = 255; 
-      c5 = 0; 
-      
-      activation_rpm = 1000; 
-      shift_rpm = 6000;
-      pixelanim  = 1; 
-      senseoption  = 2;
-      smoothing = 1; 
-      NUMPIXELS = 8;
-      //rpmscaler = EEPROM.read(12);  
-      DEBUG = 0; 
-      seg1_start = 0; 
-      seg1_end = 3; 
-      seg2_start = 0; 
-      seg2_end = 5; 
-      seg3_start = 0; 
-      seg3_end = 7;
-      cal = 1;
-      writeEEPROM();
-      resetFunc();
+    Serial.println("FIRST RUN! LOADING DEFAULTS");  
+    brightval = 0; 
+    sb = 15; 
+    c1 = 79; 
+    c2 = 48; 
+    c3 = 1; 
+    c4 = 255; 
+    c5 = 0; 
+    
+    activation_rpm = 1000; 
+    shift_rpm = 6000;
+    pixelanim  = 1; 
+    senseoption = 2;
+    smoothing = 1; 
+    NUMPIXELS = 8;
+    //rpmscaler = EEPROM.read(12);  
+    rpmscaler = 2;
+    DEBUG = 0; 
+    seg1_start = 0; 
+    seg1_end = 3; 
+    seg2_start = 0; 
+    seg2_end = 5; 
+    seg3_start = 0; 
+    seg3_end = 7;
+    cal = 1;
+    display_mode = 1;
+    writeEEPROM();
+    resetFunc();
   }  
 }
 
@@ -1599,14 +1777,16 @@ void build_segments(){
 if (pixelanim == 3){seg_mover = NUMPIXELS-1;}
   
 while (current_seg_number<4){
-      matrix.println(current_seg_number);
-      matrix.writeDisplay();    
+      //matrix.println(current_seg_number);
+      //matrix.writeDisplay();
+      processNumber(current_seg_number);
+      tm1637.display(RPMDisp);
 
       int coloradjust1 = rotary_process();         
         if (coloradjust1 == -128){seg_mover--;} 
         if (coloradjust1 == 64){seg_mover++;}    
   
-      if (digitalRead(button_pin) == LOW){ 
+      if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250);
           current_seg_number++;     
         } 
