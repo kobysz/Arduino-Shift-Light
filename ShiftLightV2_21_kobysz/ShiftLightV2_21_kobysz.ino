@@ -39,7 +39,7 @@ Modified by kobysz at gmail dot com
 #include <EEPROM.h> 
 #include <EEPROMAnything.h> 
 #include <FreqMeasure.h>
-#include <TM1637.h>
+//#include <TM1637.h>
 
 
 void(* resetFunc) (void) = 0;
@@ -48,9 +48,9 @@ int NUMPIXELS;
 
 #define RPM_PIN 2 // rpm input pin
 #define LED_PIN 6  // LED strip DIN pin
-#define SND_PIN 7  // piezo pin
-#define DISP_CLK 12 // pins definitions for TM1637 and can be changed to other ports    
-#define DISP_DIO 13 // pins definitions for TM1637 and can be changed to other ports
+//#define SND_PIN 7  // piezo pin
+//#define DISP_CLK 12 // pins definitions for TM1637 and can be changed to other ports    
+//#define DISP_DIO 13 // pins definitions for TM1637 and can be changed to other ports
 #define BUTTON_PIN 4 // rotary encoder button pin
 #define ROTARY_PIN1 10 // Arduino pins the encoder is attached to. Attach the center to ground.
 #define ROTARY_PIN2 11 // Arduino pins the encoder is attached to. Attach the center to ground.
@@ -65,7 +65,7 @@ unsigned int Color(byte r, byte g, byte b)
 } 
 
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(EEPROM.read(11), LED_PIN, NEO_GRB + NEO_KHZ800); 
-TM1637 tm1637(DISP_CLK,DISP_DIO);
+//TM1637 tm1637(DISP_CLK,DISP_DIO);
 LiquidCrystal_I2C  lcd(0x27,2,1,0,4,5,6,7); // 0x27 is the I2C bus address for an unmodified backpack
 
 //display table
@@ -219,8 +219,8 @@ void setup() {
   //matrix.begin(0x70); 
   strip.begin(); 
   strip.show(); // Initialize all pixels to 'off' 
-  tm1637.set(0);
-  tm1637.init();
+  //tm1637.set(0);
+  //tm1637.init();
   // activate LCD module
   lcd.begin (16,2); // for 16 x 2 LCD module
   lcd.setBacklightPin(3,POSITIVE);
@@ -327,12 +327,12 @@ void loop()
       if (rpm_last > 0 )
       {
         if (DEBUG) { Serial.println(rpm); }
-        processNumber(rpm);
-        tm1637.display(RPMDisp);
+        //processNumber(rpm);
+        //tm1637.display(RPMDisp);
       }
       else
       { 
-        tm1637.clearDisplay();
+        //tm1637.clearDisplay();
       }
     }
     rpm_last = rpm;             
@@ -340,7 +340,10 @@ void loop()
   else
   {
     rpm = 0;
-    if (display_mode == DISPLAY_RPM) { tm1637.clearDisplay(); }
+    if (display_mode == DISPLAY_RPM)
+    {
+      //tm1637.clearDisplay();
+    }
     clearStrip();
     strip.show(); 
   }
@@ -361,22 +364,22 @@ void loop()
     if (op_R2 > 10 && op_R2 < 200) //there must be top condition with sensors that has inf ohm on 0 bar
     {
       op_R2 -= 3;
-      int bar = (op_R2 / 15.7) * 10;
+      //int bar = (op_R2 / 15.7) * 10;
       float barf = op_R2 / 15.7;
-      processNumberBar(bar);
-      tm1637.display(RPMDisp);
+      //processNumberBar(bar);
+      //tm1637.display(RPMDisp);
       lcd.setCursor(13,1);
       lcd.print(barf);
     }
     else
     {
-      processNumberBar(0);
-      tm1637.display(RPMDisp);
+      //processNumberBar(0);
+      //tm1637.display(RPMDisp);
       lcd.setCursor (13,1);
       lcd.print("0.0");
     }
     
-    tm1637.point(POINT_ON);
+    //tm1637.point(POINT_ON);
   }
   
   //shift leds
@@ -646,7 +649,7 @@ void buildarrays(){
 // MENU SYSTEM 
 void menu()
 { 
-  tm1637.point(POINT_OFF);
+  //tm1637.point(POINT_OFF);
   lcd.clear();
   //giveTone();
   //this keeps us in the menu 
@@ -669,13 +672,9 @@ void menu()
     
   switch (rotaryval){ 
   
-    case 0: //Menu Screen. Exiting saves variables to EEPROM 
-      RPMDisp[0] = 14;//d
-      RPMDisp[1] = 19;//i
-      RPMDisp[2] = 5; //s
-      RPMDisp[3] = 26;//p
+    case 0: //Menu Screen. Exiting saves variables to EEPROM
       lcd.setCursor(0,0);
-      lcd.print("Display mode");
+      lcd.print("Display mode    ");
       lcd.setCursor(0,1);
       lcd.print("[ENTER]         ");
       
@@ -689,25 +688,17 @@ void menu()
 
         switch (display_mode){
           case 1:
-              RPMDisp[0] = 39;//
-              RPMDisp[1] = 28;//r
-              RPMDisp[2] = 26;//p
-              RPMDisp[3] = 23;//m
               lcd.setCursor(0,1);
               lcd.print("> RPM         ");
           break;
 
           case 2:
-              RPMDisp[0] = 25;//o
-              RPMDisp[1] = 19;//i
-              RPMDisp[2] = 22;//l
-              RPMDisp[3] = 26;//p
               lcd.setCursor(0,1);
               lcd.print("> Oil pressure");
           break;   
         }
 
-        tm1637.display(RPMDisp);         
+        //tm1637.display(RPMDisp);         
              
           if (digitalRead(BUTTON_PIN) == LOW){ 
             delay(250); 
@@ -727,12 +718,8 @@ void menu()
     
     
     case 1: //Adjust the global brightness 
-      RPMDisp[0] = 39;//
-      RPMDisp[1] = 11;//b
-      RPMDisp[2] = 28;//r
-      RPMDisp[3] = 29;//t
       lcd.setCursor(0,0);
-      lcd.print("LED brightness");
+      lcd.print("LED brightness  ");
       lcd.setCursor(0,1);
       lcd.print("[ENTER]         ");
             
@@ -758,13 +745,9 @@ void menu()
       color3 = load_color(c3); 
       flclr1 = load_color(c4); 
       flclr2 = load_color(c5); 
-      
-      tm1637.set(brightval/2); //tm1637 brightness scale 0-7
-      processNumber(brightval);
-      tm1637.display(RPMDisp); 
 
       lcd.setCursor (0,1);
-      lcd.print("> " + String(brightval));
+      lcd.print("> " + String(brightval) + "     ");
        
       if (testbright == false){
         testlights(4);
@@ -791,28 +774,20 @@ void menu()
    
     
     case 3: // ACTIVATION RPM 
-      RPMDisp[0] = 39;//
-      RPMDisp[1] = 10;//a
-      RPMDisp[2] = 13;//c
-      RPMDisp[3] = 29;//t
+      lcd.setCursor(0,0);
+      lcd.print("Activation RPM  ");
+      lcd.setCursor(0,1);
+      lcd.print("[ENTER]         ");
 
       while (menu_enter == 1){      
         int coloradjust1 = rotary_process(); 
         
-        if (coloradjust1 == -128){activation_rpm=activation_rpm-10;} 
-        if (coloradjust1 == 64){activation_rpm=activation_rpm+10;}         
+        if (coloradjust1 == -128) { activation_rpm=activation_rpm-100; } 
+        if (coloradjust1 == 64) { activation_rpm=activation_rpm+100; }         
         activation_rpm = constrain(activation_rpm, 0, 20000); 
         
-      if (activation_rpm<9999){
-          processNumber(activation_rpm);
-          strip.setPixelColor(0, strip.Color(0, 0, 0));
-        } else {
-          processNumber(activation_rpm-10000);
-          strip.setPixelColor(0, strip.Color(50, 50, 100));
-        }
-        //matrix.writeDisplay();
-        tm1637.display(RPMDisp);      
-        strip.show();
+        lcd.setCursor(0,1);
+        lcd.print("> " + String(activation_rpm) + "     ");
         
         if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
@@ -832,28 +807,21 @@ void menu()
     
     
     case 4: // SHIFT RPM 
-      RPMDisp[0] = 5;//s
-      RPMDisp[1] = 18;//h
-      RPMDisp[2] = 16;//f
-      RPMDisp[3] = 29;//t   
+      lcd.setCursor(0,0);
+      lcd.print("Shift RPM       ");
+      lcd.setCursor(0,1);
+      lcd.print("[ENTER]         ");
           
       while (menu_enter == 1){ 
               
         int coloradjust1 = rotary_process(); 
         
-        if (coloradjust1 == -128){shift_rpm = shift_rpm-10;}           
-        if (coloradjust1 == 64){shift_rpm = shift_rpm+10;}                   
+        if (coloradjust1 == -128) { shift_rpm = shift_rpm-100; }           
+        if (coloradjust1 == 64) { shift_rpm = shift_rpm+100; }                   
         shift_rpm = constrain(shift_rpm, 0, 20000); 
-
-        if (shift_rpm<9999){        
-          processNumber(shift_rpm);
-          strip.setPixelColor(0, strip.Color(0, 0, 0));
-        } else {
-          processNumber(shift_rpm-10000);
-          strip.setPixelColor(0, strip.Color(50, 50, 100));
-        }
-        tm1637.display(RPMDisp);       
-        strip.show(); 
+        
+        lcd.setCursor(0,1);
+        lcd.print("> " + String(shift_rpm) + "     ");      
         
         if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
@@ -903,7 +871,7 @@ void menu()
           break;   
         }
 
-        tm1637.display(RPMDisp);       
+        //tm1637.display(RPMDisp);       
            
         if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
@@ -922,7 +890,7 @@ void menu()
        RPMDisp[1] = 25; //o
        RPMDisp[2] = 25; //o
        RPMDisp[3] = 29; //t
-       tm1637.display(RPMDisp);
+       //tm1637.display(RPMDisp);
        delay(1000);
        writeEEPROM(); 
        resetFunc();
@@ -957,7 +925,7 @@ void menu()
               RPMDisp[2] = 16; //f
               RPMDisp[3] = 16; //f
        }
-        tm1637.display(RPMDisp);         
+        //tm1637.display(RPMDisp);         
            
         if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
@@ -993,8 +961,8 @@ void menu()
           //matrix.println(cal);
           //matrix.setBrightness(brightval/3); 
           //matrix.writeDisplay();
-          processNumber(cal);
-          tm1637.display(RPMDisp);
+          //processNumber(cal);
+          //tm1637.display(RPMDisp);
           prev_cal = cal;
           delay(500);     
         }
@@ -1012,8 +980,8 @@ void menu()
           break;  
         }
         
-        processNumber(rpm);
-        tm1637.display(RPMDisp);        
+        //processNumber(rpm);
+        //tm1637.display(RPMDisp);        
    
        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
@@ -1045,8 +1013,8 @@ void menu()
         if (coloradjust1 == 64){NUMPIXELS++;}                   
         NUMPIXELS = constrain(NUMPIXELS, 0, 32); 
 
-        processNumber(NUMPIXELS);
-        tm1637.display(RPMDisp); 
+        //processNumber(NUMPIXELS);
+        //tm1637.display(RPMDisp); 
    
        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
@@ -1065,7 +1033,7 @@ void menu()
        RPMDisp[1] = 25; //o
        RPMDisp[2] = 25; //o
        RPMDisp[3] = 29; //t
-       tm1637.display(RPMDisp);
+       //tm1637.display(RPMDisp);
        delay(1000);
        writeEEPROM(); 
        resetFunc();
@@ -1114,8 +1082,8 @@ break;
         pixelanim = constrain(pixelanim, 1, 3);        
         //matrix.println(pixelanim); 
         //matrix.writeDisplay(); 
-        processNumber(pixelanim);
-        tm1637.display(RPMDisp); 
+        //processNumber(pixelanim);
+        //tm1637.display(RPMDisp); 
                 
           if (prev_animation != pixelanim){
            if(DEBUG){ Serial.println("Animation Change");}
@@ -1155,19 +1123,19 @@ break;
            RPMDisp[1] = 15; //e
            RPMDisp[2] = 14; //d
            RPMDisp[3] = 25; //o
-           tm1637.display(RPMDisp);
+           //tm1637.display(RPMDisp);
            delay(1000);
            RPMDisp[0] = 39; //
            RPMDisp[1] = 5; //s
            RPMDisp[2] = 15; //e
            RPMDisp[3] = 17; //g
-           tm1637.display(RPMDisp);
+           //tm1637.display(RPMDisp);
            delay(1000);
            RPMDisp[0] = 39; //
            RPMDisp[1] = 39; //
            RPMDisp[2] = 39; //
            RPMDisp[3] = 39; //
-           tm1637.display(RPMDisp);
+           //tm1637.display(RPMDisp);
            delay(500);
            build_segments();
            for(int i=0; i<NUMPIXELS+1; i++) { 
@@ -1398,7 +1366,7 @@ break;
                RPMDisp[3] = 16;  //f
       }
 
-    tm1637.display(RPMDisp);
+    //tm1637.display(RPMDisp);
                  
         if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
@@ -1442,7 +1410,7 @@ break;
                RPMDisp[3] = 25; //o
       }
 
-     tm1637.display(RPMDisp);
+     //tm1637.display(RPMDisp);
  
                 
         if (digitalRead(BUTTON_PIN) == LOW){ 
@@ -1520,7 +1488,7 @@ break;
     break;
           
     } 
-    tm1637.display(RPMDisp); 
+    //tm1637.display(RPMDisp); 
   } 
 } //****** end MENU **********
 
@@ -1578,12 +1546,12 @@ void processNumberBar(int n)
   }
 }
 
-void giveTone()
+/*void giveTone()
 {
   tone(SND_PIN, 440);
   delay(100);
   noTone(SND_PIN);
-}
+}*/
 
 //This subroutine reads the stored variables from memory 
 void getEEPROM()
@@ -1818,8 +1786,8 @@ if (pixelanim == 3){seg_mover = NUMPIXELS-1;}
 while (current_seg_number<4){
       //matrix.println(current_seg_number);
       //matrix.writeDisplay();
-      processNumber(current_seg_number);
-      tm1637.display(RPMDisp);
+      //processNumber(current_seg_number);
+      //tm1637.display(RPMDisp);
 
       int coloradjust1 = rotary_process();         
         if (coloradjust1 == -128){seg_mover--;} 
