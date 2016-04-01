@@ -31,7 +31,6 @@ Modified by kobysz at gmail dot com
 ** 
 */ 
 
-
 // Include these libraries 
 #include <Wire.h> 
 #include <Adafruit_NeoPixel.h> 
@@ -39,8 +38,6 @@ Modified by kobysz at gmail dot com
 #include <EEPROM.h> 
 #include <EEPROMAnything.h> 
 #include <FreqMeasure.h>
-//#include <TM1637.h>
-
 
 void(* resetFunc) (void) = 0;
 int DEBUG;
@@ -65,11 +62,7 @@ unsigned int Color(byte r, byte g, byte b)
 } 
 
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(EEPROM.read(11), LED_PIN, NEO_GRB + NEO_KHZ800); 
-//TM1637 tm1637(DISP_CLK,DISP_DIO);
 LiquidCrystal_I2C  lcd(0x27,2,1,0,4,5,6,7); // 0x27 is the I2C bus address for an unmodified backpack
-
-//display table
-int8_t RPMDisp[] = {0x00,0x00,0x00,0x00};
 
 //const int rpmPin = 2; 
 //const int ledPin = 13; 
@@ -216,11 +209,8 @@ void setup() {
   timeoutCounter = timeoutValue;
   buildarrays();
   
-  //matrix.begin(0x70); 
   strip.begin(); 
-  strip.show(); // Initialize all pixels to 'off' 
-  //tm1637.set(0);
-  //tm1637.init();
+  strip.show(); // Initialize all pixels to 'off'
   // activate LCD module
   lcd.begin (16,2); // for 16 x 2 LCD module
   lcd.setBacklightPin(3,POSITIVE);
@@ -257,14 +247,10 @@ void setup() {
   delay(10); 
 
   lcd.home (); // set cursor to 0,0
-  lcd.print("  NISSAN 200SX  "); 
-  //lcd.setCursor (0,1);        // go to start of 2nd line
-  //lcd.print(millis());
+  lcd.print("  NISSAN 200SX  ");
   delay(2000);
   lcd.clear();
 } 
-
-
 
 
 
@@ -319,20 +305,23 @@ void loop()
        
   }
 
-  
   if (timeoutCounter > 0)
   { 
     if (display_mode == DISPLAY_RPM) //displays RPMs
-    {  
+    {
+      lcd.setCursor(0,0);
+      lcd.print("RPM:            ");
+      lcd.setCursor(11,1);
       if (rpm_last > 0 )
       {
         if (DEBUG) { Serial.println(rpm); }
-        //processNumber(rpm);
-        //tm1637.display(RPMDisp);
+        if (rpm<10000) lcd.print(' ');
+        if (rpm<1000) lcd.print(' ');
+        lcd.print(rpm);
       }
       else
       { 
-        //tm1637.clearDisplay();
+        lcd.print("    0");
       }
     }
     rpm_last = rpm;             
@@ -342,7 +331,8 @@ void loop()
     rpm = 0;
     if (display_mode == DISPLAY_RPM)
     {
-      //tm1637.clearDisplay();
+      lcd.setCursor (11,1);
+      lcd.print("    0");
     }
     clearStrip();
     strip.show(); 
@@ -354,7 +344,7 @@ void loop()
   if (display_mode == DISPLAY_OILPRESS) //displays OIL PRESSURE
   {
     lcd.setCursor (0,0);
-    lcd.print("Oil pressure:");
+    lcd.print("Oil pressure:   ");
     
     op_raw = analogRead(OIL_PRESS_PIN);    // Reads the Input PIN
     op_Vout = (5.0 / 1023.0) * op_raw;    // Calculates the Voltage on th Input PIN
@@ -366,20 +356,15 @@ void loop()
       op_R2 -= 3;
       //int bar = (op_R2 / 15.7) * 10;
       float barf = op_R2 / 15.7;
-      //processNumberBar(bar);
-      //tm1637.display(RPMDisp);
       lcd.setCursor(13,1);
       lcd.print(barf);
     }
     else
     {
-      //processNumberBar(0);
-      //tm1637.display(RPMDisp);
       lcd.setCursor (13,1);
       lcd.print("0.0");
     }
     
-    //tm1637.point(POINT_ON);
   }
   
   //shift leds
@@ -649,18 +634,16 @@ void buildarrays(){
 // MENU SYSTEM 
 void menu()
 { 
-  //tm1637.point(POINT_OFF);
   lcd.clear();
-  //giveTone();
   //this keeps us in the menu 
   while (menuvar == 1)
   {   
   
   // This little bit calls the rotary encoder   
   int result = rotary_process(); 
-  if(DEBUG){if(result!=0){Serial.println(result);}}
-  if (result == -128){rotaryval--;}   
-  else if (result == 64){rotaryval++;} 
+  if(DEBUG) { if(result!=0) { Serial.println(result); } }
+  if (result == -128) { rotaryval--; }   
+  else if (result == 64){ rotaryval++; } 
  
   rotaryval = constrain(rotaryval, 0, 18); 
 
@@ -843,11 +826,10 @@ void menu()
 
 
      case 5:  //RPM SENSE MODE
-    //senseoption
-      RPMDisp[0] = 5; //s
-      RPMDisp[1] = 15;//e
-      RPMDisp[2] = 24;//n
-      RPMDisp[3] = 5; //s
+      lcd.setCursor(0,0);
+      lcd.print("RPM sense mode  ");
+      lcd.setCursor(0,1);
+      lcd.print("[ENTER]         ");
       
       while (menu_enter == 1){         
         int coloradjust1 = rotary_process();         
@@ -857,21 +839,15 @@ void menu()
 
         switch (senseoption){
           case 1:
-              RPMDisp[0] = 19; //i
-              RPMDisp[1] = 24;//n
-              RPMDisp[2] = 29;//t
-              RPMDisp[3] = 28; //r
+              lcd.setCursor(0,1);
+              lcd.print("> Interrupt     ");
           break;
 
           case 2:
-              RPMDisp[0] = 39; //
-              RPMDisp[1] = 39;//
-              RPMDisp[2] = 16;//f
-              RPMDisp[3] = 28; //r
+              lcd.setCursor(0,1);
+              lcd.print("> Frequency     ");
           break;   
-        }
-
-        //tm1637.display(RPMDisp);       
+        }   
            
         if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
@@ -886,11 +862,8 @@ void menu()
             strip.show(); 
           }
 
-       RPMDisp[0] = 11; //b
-       RPMDisp[1] = 25; //o
-       RPMDisp[2] = 25; //o
-       RPMDisp[3] = 29; //t
-       //tm1637.display(RPMDisp);
+       lcd.clear();
+       lcd.print("     REBOOT");
        delay(1000);
        writeEEPROM(); 
        resetFunc();
@@ -900,10 +873,10 @@ void menu()
 
 
      case 6:  //SMOOTHING (conditioning)
-      RPMDisp[0] = 12; //c
-      RPMDisp[1] = 25; //o
-      RPMDisp[2] = 24; //n
-      RPMDisp[3] = 14; //d
+      lcd.setCursor(0,0);
+      lcd.print("RPM smoothing   ");
+      lcd.setCursor(0,1);
+      lcd.print("[ENTER]         ");
       
       while (menu_enter == 1){ 
         
@@ -913,19 +886,13 @@ void menu()
         smoothing = constrain(smoothing, 0, 1); 
 
 
-      if (smoothing){
-              RPMDisp[0] = 39; //
-              RPMDisp[1] = 39; //
-              RPMDisp[2] = 25; //o
-              RPMDisp[3] = 24; //n
-        
-      }else{
-              RPMDisp[0] = 39; //
-              RPMDisp[1] = 25; //o
-              RPMDisp[2] = 16; //f
-              RPMDisp[3] = 16; //f
-       }
-        //tm1637.display(RPMDisp);         
+        if (smoothing){
+                lcd.setCursor(0,1);
+                lcd.print("> On            ");
+        } else {
+                lcd.setCursor(0,1);
+                lcd.print("> Off           ");
+        }        
            
         if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
@@ -945,10 +912,10 @@ void menu()
 
 
  case 7:  // PULSES PER REVOLUTION
-      RPMDisp[0] = 39; //
-      RPMDisp[1] = 26; //p
-      RPMDisp[2] = 26; //p
-      RPMDisp[3] = 28; //r
+      lcd.setCursor(0,0);
+      lcd.print("RPM pulses (ppr)");
+      lcd.setCursor(0,1);
+      lcd.print("[ENTER]         ");
       
       while (menu_enter == 1){ 
         
@@ -958,13 +925,10 @@ void menu()
         cal = constrain(cal, 1, 36); 
         
         if (prev_cal != cal){
-          //matrix.println(cal);
-          //matrix.setBrightness(brightval/3); 
-          //matrix.writeDisplay();
-          //processNumber(cal);
-          //tm1637.display(RPMDisp);
+          lcd.setCursor(0,1);
+          lcd.print("> " + String(cal));
           prev_cal = cal;
-          delay(500);     
+          //delay(500);     
         }
  
         switch (senseoption){
@@ -979,11 +943,19 @@ void menu()
             }
           break;  
         }
-        
-        //processNumber(rpm);
-        //tm1637.display(RPMDisp);        
+
+        //if (rpm > 9999){ matrix.println(rpm/10);
+        //}else{matrix.println(rpm); }
+        //matrix.setBrightness(brightval);
+        //matrix.writeDisplay();
+        lcd.setCursor(11,1);
+        if (rpm<10000) lcd.print(' ');
+        if (rpm<1000) lcd.print(' ');
+        if (rpm<100) lcd.print(' ');
+        if (rpm<10) lcd.print(' ');
+        lcd.print(rpm);
    
-       if (digitalRead(BUTTON_PIN) == LOW){ 
+        if (digitalRead(BUTTON_PIN) == LOW){ 
           delay(250); 
           menu_enter = 0; 
           clearStrip(); 
@@ -1001,10 +973,10 @@ void menu()
 
 
      case 8:  // NUMBER OF LEDS
-      RPMDisp[0] = 24; //n
-      RPMDisp[1] = 22; //l
-      RPMDisp[2] = 15; //e
-      RPMDisp[3] = 14; //d
+      //RPMDisp[0] = 24; //n
+      //RPMDisp[1] = 22; //l
+      //RPMDisp[2] = 15; //e
+      //RPMDisp[3] = 14; //d
       
       while (menu_enter == 1){ 
         
@@ -1029,10 +1001,10 @@ void menu()
             strip.show(); 
           }
 
-       RPMDisp[0] = 11; //b
-       RPMDisp[1] = 25; //o
-       RPMDisp[2] = 25; //o
-       RPMDisp[3] = 29; //t
+       //RPMDisp[0] = 11; //b
+       //RPMDisp[1] = 25; //o
+       //RPMDisp[2] = 25; //o
+       //RPMDisp[3] = 29; //t
        //tm1637.display(RPMDisp);
        delay(1000);
        writeEEPROM(); 
@@ -1043,10 +1015,10 @@ void menu()
     
  
      case 9:  // Color Segmentation
-      RPMDisp[0] = 39;//
-      RPMDisp[1] = 5; //s
-      RPMDisp[2] = 15;//e
-      RPMDisp[3] = 17;//g
+      //RPMDisp[0] = 39;//
+      //RPMDisp[1] = 5; //s
+      //RPMDisp[2] = 15;//e
+      //RPMDisp[3] = 17;//g
       
       if (menu_enter == 1){
           build_segments();
@@ -1070,10 +1042,10 @@ break;
 
      case 10:  // PIXEL ANIMATION MODE
 
-      RPMDisp[0] = 10; //a
-      RPMDisp[1] = 24; //n
-      RPMDisp[2] = 19; //i
-      RPMDisp[3] = 23; //m
+      //RPMDisp[0] = 10; //a
+      //RPMDisp[1] = 24; //n
+      //RPMDisp[2] = 19; //i
+      //RPMDisp[3] = 23; //m
     
       while (menu_enter == 1){        
         int coloradjust1 = rotary_process();         
@@ -1119,22 +1091,22 @@ break;
            menu_enter = 0;
            clearStrip(); 
            strip.show(); 
-           RPMDisp[0] = 28; //r
-           RPMDisp[1] = 15; //e
-           RPMDisp[2] = 14; //d
-           RPMDisp[3] = 25; //o
+           //RPMDisp[0] = 28; //r
+           //RPMDisp[1] = 15; //e
+           //RPMDisp[2] = 14; //d
+           //RPMDisp[3] = 25; //o
            //tm1637.display(RPMDisp);
            delay(1000);
-           RPMDisp[0] = 39; //
-           RPMDisp[1] = 5; //s
-           RPMDisp[2] = 15; //e
-           RPMDisp[3] = 17; //g
+           //RPMDisp[0] = 39; //
+           //RPMDisp[1] = 5; //s
+           //RPMDisp[2] = 15; //e
+           //RPMDisp[3] = 17; //g
            //tm1637.display(RPMDisp);
            delay(1000);
-           RPMDisp[0] = 39; //
-           RPMDisp[1] = 39; //
-           RPMDisp[2] = 39; //
-           RPMDisp[3] = 39; //
+           //RPMDisp[0] = 39; //
+           //RPMDisp[1] = 39; //
+           //RPMDisp[2] = 39; //
+           //RPMDisp[3] = 39; //
            //tm1637.display(RPMDisp);
            delay(500);
            build_segments();
@@ -1152,10 +1124,10 @@ break;
         
     
     case 11: //Adjust Color #1     
-      RPMDisp[0] = 12; //c
-      RPMDisp[1] = 22; //l
-      RPMDisp[2] = 28; //r
-      RPMDisp[3] = 1;  //1
+      //RPMDisp[0] = 12; //c
+      //RPMDisp[1] = 22; //l
+      //RPMDisp[2] = 28; //r
+      //RPMDisp[3] = 1;  //1
       
      while (menu_enter == 1){ 
         
@@ -1190,10 +1162,10 @@ break;
     
     
     case 12: //Adjust Color #2 
-      RPMDisp[0] = 12; //c
-      RPMDisp[1] = 22; //l
-      RPMDisp[2] = 28; //r
-      RPMDisp[3] = 2;  //2
+      //RPMDisp[0] = 12; //c
+      //RPMDisp[1] = 22; //l
+      //RPMDisp[2] = 28; //r
+      //RPMDisp[3] = 2;  //2
            
       while (menu_enter == 1){ 
       
@@ -1228,10 +1200,10 @@ break;
     break; 
     
     case 13: //Adjust Color #3 
-      RPMDisp[0] = 12; //c
-      RPMDisp[1] = 22; //l
-      RPMDisp[2] = 28; //r
-      RPMDisp[3] = 3;  //3
+      //RPMDisp[0] = 12; //c
+      //RPMDisp[1] = 22; //l
+      //RPMDisp[2] = 28; //r
+      //RPMDisp[3] = 3;  //3
             
       while (menu_enter == 1){       
         int coloradjust1 = rotary_process();         
@@ -1264,10 +1236,10 @@ break;
     break; 
     
     case 14: //Adjust Color #4 
-      RPMDisp[0] = 5; //s
-      RPMDisp[1] = 12; //c
-      RPMDisp[2] = 39; //
-      RPMDisp[3] = 1;  //1
+      //RPMDisp[0] = 5; //s
+      //RPMDisp[1] = 12; //c
+      //RPMDisp[2] = 39; //
+      //RPMDisp[3] = 1;  //1
       
             
       while (menu_enter == 1){       
@@ -1302,10 +1274,10 @@ break;
     break; 
     
     case 15: //Adjust Color #5 
-      RPMDisp[0] = 5; //s
-      RPMDisp[1] = 12; //c
-      RPMDisp[2] = 39; //
-      RPMDisp[3] = 2;  //2
+      //RPMDisp[0] = 5; //s
+      //RPMDisp[1] = 12; //c
+      //RPMDisp[2] = 39; //
+      //RPMDisp[3] = 2;  //2
       
       while (menu_enter == 1){       
         int coloradjust1 = rotary_process();        
@@ -1342,10 +1314,10 @@ break;
 
     
     case 16:   //DEBUG MODE
-      RPMDisp[0] = 14; //d
-      RPMDisp[1] = 15; //e
-      RPMDisp[2] = 11; //b
-      RPMDisp[3] = 17;  //g
+      //RPMDisp[0] = 14; //d
+      //RPMDisp[1] = 15; //e
+      //RPMDisp[2] = 11; //b
+      //RPMDisp[3] = 17;  //g
       
  while (menu_enter == 1){       
         int coloradjust1 = rotary_process();        
@@ -1354,16 +1326,16 @@ break;
         DEBUG = constrain(DEBUG, 0, 1); 
          
       if (DEBUG== 1){
-               RPMDisp[0] = 39; //
-               RPMDisp[1] = 39; //
-               RPMDisp[2] = 25; //o
-               RPMDisp[3] = 24;  //n
+               //RPMDisp[0] = 39; //
+               //RPMDisp[1] = 39; //
+               //RPMDisp[2] = 25; //o
+               //RPMDisp[3] = 24;  //n
         
       }else{
-               RPMDisp[0] = 39; //
-               RPMDisp[1] = 25; //o
-               RPMDisp[2] = 16; //f
-               RPMDisp[3] = 16;  //f
+               //RPMDisp[0] = 39; //
+               //RPMDisp[1] = 25; //o
+               //RPMDisp[2] = 16; //f
+               //RPMDisp[3] = 16;  //f
       }
 
     //tm1637.display(RPMDisp);
@@ -1386,10 +1358,10 @@ break;
 
 
     case 17:   //RESET
-       RPMDisp[0] = 39; //
-       RPMDisp[1] = 28; //r
-       RPMDisp[2] = 5; //s
-       RPMDisp[3] = 29;  //t
+       //RPMDisp[0] = 39; //
+       //RPMDisp[1] = 28; //r
+       //RPMDisp[2] = 5; //s
+       //RPMDisp[3] = 29;  //t
       
  while (menu_enter == 1){       
         int coloradjust1 = rotary_process();        
@@ -1398,16 +1370,16 @@ break;
         rst = constrain(rst, 0, 1); 
         
       if (rst == 1){
-               RPMDisp[0] = 39; //
-               RPMDisp[1] = 32; //y
-               RPMDisp[2] = 15; //e
-               RPMDisp[3] = 5; //s
+               //RPMDisp[0] = 39; //
+               //RPMDisp[1] = 32; //y
+               //RPMDisp[2] = 15; //e
+               //RPMDisp[3] = 5; //s
         
       }else{
-               RPMDisp[0] = 39; //
-               RPMDisp[1] = 39; //
-               RPMDisp[2] = 24; //n
-               RPMDisp[3] = 25; //o
+               //RPMDisp[0] = 39; //
+               //RPMDisp[1] = 39; //
+               //RPMDisp[2] = 24; //n
+               //RPMDisp[3] = 25; //o
       }
 
      //tm1637.display(RPMDisp);
@@ -1450,12 +1422,8 @@ break;
 
 
       case 18: //Menu Screen. Exiting saves variables to EEPROM 
-      RPMDisp[0] = 15;//e
-      RPMDisp[1] = 18;//x
-      RPMDisp[2] = 19;//i
-      RPMDisp[3] = 29;//t
       lcd.setCursor (0,0);
-      lcd.print("Save and exit");
+      lcd.print("Save and exit   ");
       
       //Poll the Button to exit 
       if (menu_enter == 1){
@@ -1496,63 +1464,6 @@ break;
 /*************************
  * SUBROUTINES
  *************************/
-void processNumber(long n)
-{
-  if (n > 9999) {
-    n = n/10;
-  }
-  if (n > 999) {
-    //int n = rpm;
-    RPMDisp[0] = n / 1000;
-    n -= RPMDisp[0] * 1000;
-    RPMDisp[1] = n / 100;
-    n -= RPMDisp[1] * 100;
-    RPMDisp[2] = n / 10;
-    n -= RPMDisp[2] * 10;
-    RPMDisp[3] = n;
-  } else if (n > 99) {
-    RPMDisp[0] = 39;
-    RPMDisp[1] = n / 100;
-    n -= RPMDisp[1] * 100;
-    RPMDisp[2] = n / 10;
-    n -= RPMDisp[2] * 10;
-    RPMDisp[3] = n;
-  } else if (n > 9) {
-    RPMDisp[0] = 39;
-    RPMDisp[1] = 39;
-    RPMDisp[2] = n / 10;
-    n -= RPMDisp[2] * 10;
-    RPMDisp[3] = n;
-  } else {
-    RPMDisp[0] = 39;
-    RPMDisp[1] = 39;
-    RPMDisp[2] = 39;
-    RPMDisp[3] = n;
-  }
-}
-void processNumberBar(int n)
-{
-  if (n > 9) {
-    RPMDisp[0] = 39;
-    RPMDisp[1] = n / 10;
-    n -= RPMDisp[1] * 10;
-    RPMDisp[2] = n;
-    RPMDisp[3] = 11;
-  } else {
-    RPMDisp[0] = 39;
-    RPMDisp[1] = 0;
-    RPMDisp[2] = n;
-    RPMDisp[3] = 11;
-  }
-}
-
-/*void giveTone()
-{
-  tone(SND_PIN, 440);
-  delay(100);
-  noTone(SND_PIN);
-}*/
-
 //This subroutine reads the stored variables from memory 
 void getEEPROM()
 { 
